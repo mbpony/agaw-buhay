@@ -369,6 +369,15 @@ body.touch .room{padding:13px}
 body.touch .prow{padding:12px}
 body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus */
   #hud.fpmode .dupfp { display: none !important; }
+/* ---- customizable HUD layout editor (client/hudlayout.js) ---- */
+body.hudedit .hudl-w{outline:1px dashed rgba(255,210,74,.75);outline-offset:2px;pointer-events:auto !important;cursor:move}
+body.hudedit .hudl-w.hudl-sel{outline:2px solid #ffd24a}
+.hudl-ghost{position:fixed;z-index:60;border:1px dashed rgba(127,212,255,.85);background:rgba(10,20,30,.35);color:#cfe9ff;font:600 10px/1.3 var(--mono);display:flex;align-items:center;justify-content:center;text-align:center;cursor:move;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none}
+.hudl-ghost.hudl-sel{border:2px solid #ffd24a;color:#ffd24a}
+#hudlBar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));z-index:61;display:flex;align-items:center;gap:6px;background:rgba(8,11,16,.94);border:1px solid #2a3240;border-radius:10px;padding:7px 9px;pointer-events:auto;max-width:96vw;flex-wrap:wrap;justify-content:center}
+#hudlBar button{background:#1a2230;color:#dfe6ef;border:1px solid #333d4e;border-radius:7px;padding:6px 9px;font:700 10px var(--mono);cursor:pointer;touch-action:manipulation}
+#hudlBar button.go{background:#1d6b35;border-color:#2c9149;color:#eafff0}
+#hudlSel{color:#ffd24a;font:700 10px var(--mono);min-width:96px;text-align:center}
 </style>
 </head>
 <body>
@@ -609,6 +618,7 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
       </div>
       <div class="switch"><span>Auto-adjust quality<small>Steps down if the framerate drops</small></span><div class="tog on" id="setAutoQ"></div></div>
       <div class="hint" id="touchHint" style="margin-top:10px;display:none">Touch: left pad moves, right pad aims and auto-fires. Full stick tilt sprints.</div>
+      <button class="btn ghost" id="btnHudLayout" style="margin-top:12px">Customize HUD Layout<small>Drag widgets and buttons, resize, fade — saved on this device</small></button>
       <div class="row" style="margin-top:14px">
         <button class="btn green" id="btnResume">Resume</button>
         <button class="btn ghost" id="btnFull">Full Screen</button>
@@ -721,6 +731,7 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
     ['r3d.js', 'ABAW_R3D'],
     ['predict.js', 'ABAW_PREDICT'],
     ['render.js', 'ABAW_RENDER'],
+    ['hudlayout.js', 'ABAW_HUDL'],
     ['main.js', 'ABAW_DEBUG']
   ];
   window.addEventListener('load', function () {
@@ -750,6 +761,7 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
 <script src="r3d.js"></script>
 <script src="predict.js"></script>
 <script src="render.js"></script>
+<script src="hudlayout.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

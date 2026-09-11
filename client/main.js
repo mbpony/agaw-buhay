@@ -572,6 +572,7 @@
       if (knob) knob.style.transform = 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px)';
     };
     el.addEventListener(DOWN, e => {
+      if (window.ABAW_HUDL && ABAW_HUDL.editing) return;      // layout editor owns the pointer
       if (st.id !== null) return;
       const p = allPts(e)[0]; if (!p) return;
       st.id = p.id; el.classList.add('active'); place(p);
@@ -595,6 +596,7 @@
   function bindBtn(id, down, up) {
     const el = $(id); if (!el) return;
     el.addEventListener(DOWN, e => {
+      if (window.ABAW_HUDL && ABAW_HUDL.editing) return;      // layout editor owns the pointer
       const p = allPts(e)[0];
       el._pid = p ? p.id : 0;
       el.classList.add('pressed');
@@ -1059,6 +1061,11 @@
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     app.frameDt = dt;
+    if (window.ABAW_HUDL && ABAW_HUDL.editing) {              // HUD layout editor: live preview only
+      if (app.screen === 'game' && renderer && renderer.draw) { try { renderer.draw(now, dt); } catch (e) {} }
+      requestAnimationFrame(loop);
+      return;
+    }
     if (app.screen === 'game') {
       // seed the view yaw from wherever the survivor was already facing
       if (!app.yawInit && app.lastSnap && app.lastSnap.surv) {
@@ -1234,6 +1241,12 @@
     click('btnStart', () => send({ t: 'start' }));
     click('btnLeave', () => { if (app.mode === 'net' && app.screen === 'game') quitRun(); else { send({ t: 'leave' }); app.room = null; show('title'); } });
     click('btnSoloStart', () => startSolo());
+    if (window.ABAW_HUDL) ABAW_HUDL.init();
+    click('btnHudLayout', () => {
+      if (!window.ABAW_HUDL) return;
+      if (app.paused) togglePause();
+      ABAW_HUDL.startEdit({ onDone: saved => toast(saved ? 'HUD layout saved to this device' : 'HUD layout unchanged') });
+    });
     click('btnResume', () => togglePause());
     click('btnQuit', () => quitRun());
     // host-controlled lobby settings

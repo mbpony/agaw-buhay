@@ -10,7 +10,7 @@ const WS = require('ws');
 
 const ROOT = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
-const SCRIPTS = ['core/data.js', 'core/level.js', 'core/sim.js', 'client/audio.js', 'client/predict.js', 'client/render.js', 'client/main.js'];
+const SCRIPTS = ['core/data.js', 'core/level.js', 'core/sim.js', 'client/audio.js', 'client/predict.js', 'client/render.js', 'client/hudlayout.js', 'client/main.js'];
 
 /* ---------------- WebAudio stub ---------------- */
 function param(v) {

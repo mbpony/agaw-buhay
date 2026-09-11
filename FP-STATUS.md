@@ -1,3 +1,9 @@
+## Customizable HUD layout [shipped 2026-09-12]
+- `client/hudlayout.js` (ABAW_HUDL): drag/scale/fade editor for 16 DOM widgets (status chips, objective, prompt, announcements, feed, fps, both touch pads, all 8 touch buttons) + 4 canvas panels (minimap, compass, health, ammo) via ghost handles; render.js drawHud gained `withPanel(key)` hooks consuming `canvasPos(W,H)`.
+- Entry point: Pause (settings) -> "Customize HUD Layout". Toolbar: SIZE/FADE/RESET/RESET ALL/DONE; Esc = save. Per-device persistence in localStorage; offsets stored as viewport %.
+- Game input suppressed while editing (loop renders preview only); bindPad/bindBtn ignore pointers in edit mode.
+- test/hudlayout.js: 34 asserts (registry, apply, persistence round-trip, canvas px conversion, drawHud hook integration w/ recording ctx, edit lifecycle). ALL 11 SUITES PASSED.
+
 ## Phase 4 — TRUE 3D (Three.js) [shipped 2026-09-12, master-doc milestones 1-3 + parts of 4-5]
 - `client/r3d.js`: SceneKit (testable scene graph) + Renderer3D (WebGL over the 2D HUD overlay) + buildWorld (instanced walls/roads/water/rubble + PH dressing: poles, jeepneys, tricycles) + ENEMY_BUILDERS (8 procedural folklore silhouettes incl. flapping Manananggal wings) + WEAPON_BUILDERS (6 3D viewmodels with muzzle anchors) + rain/fog/lightning + perf tiers.
 - Three.js vendored at `client/vendor/three.min.js` (offline-safe UMD; no CDN).

@@ -1215,9 +1215,21 @@
         ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillText(str, x + 1.2 * u, y + 1.2 * u);
         ctx.fillStyle = colr; ctx.fillText(str, x, y);
       };
-      this.drawMinimapFP(ctx, ents, u);
+      // customizable HUD layout hooks (client/hudlayout.js -> canvasPos)
+      const HP = (typeof window !== 'undefined' && window.ABAW_HUDL && window.ABAW_HUDL.canvasPos) ? window.ABAW_HUDL.canvasPos(W, H) : (this.hudPos || {});
+      const withPanel = (key, fn) => {
+        const p = HP[key];
+        if (!p || (!p.dx && !p.dy && (p.o == null || p.o === 1))) { fn(); return; }
+        ctx.save();
+        if (p.dx || p.dy) ctx.translate(p.dx || 0, p.dy || 0);
+        if (p.o != null && p.o !== 1) ctx.globalAlpha = (typeof ctx.globalAlpha === 'number' ? ctx.globalAlpha : 1) * p.o;
+        fn();
+        ctx.restore();
+      };
+      withPanel('minimap', () => this.drawMinimapFP(ctx, ents, u));
 
       // ---- thin compass strip (Warzone) ----
+      withPanel('compass', () => {
       const deg = Renderer.degFromYaw(this.yaw);
       const cw = Math.min(W * 0.40, 430 * u), ch = 13 * u, cx0 = W / 2, cy0 = 9 * u + ch / 2, pxd = cw / 90;
       ctx.save();
@@ -1249,6 +1261,7 @@
       ctx.restore();
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.moveTo(cx0, cy0 + ch / 2 + 1 * u); ctx.lineTo(cx0 - 3.4 * u, cy0 + ch / 2 + 6 * u); ctx.lineTo(cx0 + 3.4 * u, cy0 + ch / 2 + 6 * u); ctx.closePath(); ctx.fill();
+      });
 
       // ---- crosshair (outlined, dynamic) ----
       const tgt = 5 + (this.fpMoving ? 6 : 0) + (this.fpMuzzle > 0 ? 7 : 0) + ((me && me.sp) ? 3 : 0);
@@ -1284,7 +1297,7 @@
       }
 
       // ---- health: bottom-left, cross icon + slim bar ----
-      if (me) {
+      if (me) withPanel('health', () => {
         const bx = 16 * u, by = H - 20 * u, bw = 148 * u, bh = 5 * u;
         const low = me.hp / me.mhp <= 0.35;
         ctx.fillStyle = low ? '#ff5f52' : '#e8ecf2';                       // med cross
@@ -1296,16 +1309,16 @@
         ctx.strokeRect(bx + 12 * u, by - 2 * u, bw, bh);
         if (me.arm > 0) { ctx.fillStyle = '#8fb4ff'; ctx.fillRect(bx + 12 * u, by - 5 * u, bw * clamp(me.ar / (me.arm || 1), 0, 1), 2 * u); }
         txt(String(Math.max(0, me.hp)), bx + 16 * u + bw, by + 3.5 * u, 10, low ? '#ff5f52' : 'rgba(255,255,255,.85)', 'left', 600);
-        if (me.hp / me.mhp < 0.3) {
-          const a = 0.15 + 0.11 * Math.sin(this.time * 6);
-          const gg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.78);
-          gg.addColorStop(0, 'rgba(120,0,0,0)'); gg.addColorStop(1, 'rgba(150,0,0,' + a.toFixed(3) + ')');
-          ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
+      });
+      if (me && me.hp / me.mhp < 0.3) {
+        const a = 0.15 + 0.11 * Math.sin(this.time * 6);
+        const gg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.78);
+        gg.addColorStop(0, 'rgba(120,0,0,0)'); gg.addColorStop(1, 'rgba(150,0,0,' + a.toFixed(3) + ')');
+        ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
         }
-      }
 
       // ---- ammo cluster: bottom-right, big condensed numbers ----
-      if (me) {
+      if (me) withPanel('ammo', () => {
         const ax = W - 18 * u;
         txt(String(me.mag), ax - 44 * u, H - 22 * u, 34, me.mag === 0 ? '#ff5f52' : '#f2f5f9', 'right', 800);
         txt('/ ' + me.res, ax, H - 24 * u, 13, 'rgba(242,245,249,.66)', 'right', 600);
@@ -1321,8 +1334,8 @@
           ctx.beginPath(); ctx.arc(ax - 84 * u, H - 28 * u, 5 * u, 0, 6.2832); ctx.stroke();
           txt('x' + me.tn, ax - 74 * u, H - 24 * u, 10, '#ff9a3c', 'left', 700);
         }
-        txt('KILLS  ' + (me.k || 0), W - 16 * u, 20 * u, 11, 'rgba(242,245,249,.9)', 'right', 700);
-      }
+      });
+      if (me) txt('KILLS  ' + (me.k || 0), W - 16 * u, 20 * u, 11, 'rgba(242,245,249,.9)', 'right', 700);
 
       // ---- boss bar: segmented, top-centre under compass ----
       const boss = (ents.en || []).find(e => e.b);
