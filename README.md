@@ -103,7 +103,15 @@ pointer and switches to a twin-stick layout — no separate build, no app store.
 * Rotating to portrait **auto-pauses** and shows a rotate prompt — you won't
   die to a horde while turning over in bed.
 * Tapping anywhere requests immersive fullscreen and asks Android to lock
-  landscape (iOS ignores the lock request safely; use the rotate prompt).
+  landscape, and keeps retrying on later taps because browsers often refuse the
+  first request.
+* **iPhone Safari cannot hide its own bar** — no web page can; that is an Apple
+  platform rule. So on iPhone the game instead shows a one-time hint pointing at
+  the only real fullscreen: Share → *Add to Home Screen*, which our manifest and
+  `apple-mobile-web-app-capable` meta tags turn into a chrome-free,
+  landscape-locked launch. The hint is dismissible and never shows twice.
+* Layout uses `100dvh`, so the canvas always matches the height actually on
+  screen as Safari's bars collapse and return.
 * Notch, home bar and rounded corners are handled with `env(safe-area-inset-*)`.
 * `?touch=1` forces the touch layout on a desktop browser, `?touch=0` forces it
   off — useful for a touchscreen laptop that would otherwise be detected as a
@@ -138,6 +146,26 @@ so a teammate can still pick you up. A full page refresh works the same way
 (the token is kept in `sessionStorage`).
 
 ---
+
+### Your own camera
+
+Every player's view is centred on **their own survivor**, not on the squad or the
+host. The sim still computes one shared squad camera (the centroid of everyone
+alive, zooming out as the team spreads) and that is what the game used to
+broadcast — so anyone who split from the group drifted to the edge of the screen
+or off it entirely, unable to see their own character. Each client now derives
+its own camera from its own snapshot survivor:
+
+* your view follows you, including the small client-side prediction step, so it
+  never lags your thumbs;
+* zoom eases out only for teammates near *you*, so a squadmate sprinting to the
+  far side of the map no longer shrinks your view;
+* the minimap centres on you and your dot is drawn white with an aim line;
+* if you die, your camera follows the nearest living teammate instead of your
+  corpse, so you can spectate the escape.
+
+Mouse/aim maths uses the same per-player camera, so where you point is where you
+shoot regardless of where the rest of the squad is.
 
 ### Loot & loadout
 
@@ -233,6 +261,13 @@ curl https://YOUR-SERVICE.onrender.com/health
 Open the URL in mobile Safari or Chrome → Share / ⋮ → **Add to Home Screen**.
 It launches full-bleed with no browser chrome, which on a phone is the
 difference between a playable view and a cramped one.
+
+On **iPhone this is the only true fullscreen**, so treat it as the intended way
+to play there: the installed icon (`apple-touch-icon.png`) opens the game with no
+Safari bar at all, locked to landscape. The manifest declares
+`"display": "fullscreen"` and `"orientation": "landscape"`, and the icons are
+regenerated from code with `node tools/gen-icons.js` — the project keeps its
+zero-binary-assets rule even for the app icon.
 
 ### Things to know about the free tier
 
@@ -391,12 +426,12 @@ npm run test:deploy      # render.com readiness
 | **balance** | A competent-player proxy (waypoint navigation, hazard avoidance, target priority, revives, abilities) plays all 3 stages × 3 difficulties × 2 seeds headlessly | Normal and Veteran must be winnable everywhere; Nightmare must be brutal but not impossible; no stage may soft-lock; sim cost must stay under 35% of one core (measured: **1.6%**) — **10 contract checks** |
 | **dom** | Cross-references every `#id` main.js touches against index.html, and every global the boot-error banner checks against the file that is supposed to publish it | No dangling element references (this caught a boot-time crash on `#fps`) — all **107** referenced ids exist among the **147** in the document; all **6** boot-check globals are real (this caught a banner that checked `window.DATA`, which nothing defines, so it fired on every load) |
 | **net** | Two-to-five real WebSocket clients against the live server | Static serving, path-traversal block, handshake, lobby, duplicate-pick rejection, host authority over config/start, level + snapshot delivery, ~24 Hz rate, authoritative input, chat relay, late join, disconnect→bot takeover, host transfer, **seat-token reconnect reclaim**, room cleanup; `GET /` must 302 into `/client/` so the relative script paths resolve — **67 checks** |
-| **client** | Boots the actual client in jsdom with a stubbed canvas/WebAudio/WebSocket, then plays it | No errors during boot or play; menus and auth flows; a full offline single-player run with a ticking clock, live HUD and 150k+ draw calls; WASD/aim/fire/ability/reload/melee; **smashing a container with `F` and watching the drop hit the floor and the renderer**; `E` pickups into slot 2, `Q` swaps and the HUD following the *active* gun, `G` throws, the gear-strip chips, kevlar soak maths; pause, scoreboard, mute, quality selector; then a **real networked co-op match** against the live server including lobby, launch and squad HUD; plus the **boot-error banner must stay silent on a healthy boot** — **87 checks** |
-| **mobile** | Boots the same client as an 844×390 landscape phone (DPR 3, 2 GB RAM, 4 cores) and drives it with synthesised touch events | Touch detection; low tier auto-selected with grain/glow off and DPR capped; rotate gate in portrait; twin-stick deadzone, rim clamping and full-tilt sprint; **the survivor physically moves around the map on thumb power**; aim stick + auto-fire; simultaneous multi-touch; every cluster button; ability cooldown ring; aim assist locking the nearest threat; GFX cycling; pause; auto-pause on rotate; then a **second boot with PointerEvent removed** to exercise the TouchEvent fallback — **87 checks** |
+| **client** | Boots the actual client in jsdom with a stubbed canvas/WebAudio/WebSocket, then plays it | No errors during boot or play; menus and auth flows; a full offline single-player run with a ticking clock, live HUD and 150k+ draw calls; WASD/aim/fire/ability/reload/melee; **smashing a container with `F` and watching the drop hit the floor and the renderer**; `E` pickups into slot 2, `Q` swaps and the HUD following the *active* gun, `G` throws, the gear-strip chips, kevlar soak maths; pause, scoreboard, mute, quality selector; then a **real networked co-op match** against the live server including lobby, launch and squad HUD; the **boot-error banner must stay silent on a healthy boot**; and **per-player cameras** — separating two survivors must give two different views that each sit on their own player, never on the squad centroid — **98 checks** |
+| **mobile** | Boots the same client as an 844×390 landscape phone (DPR 3, 2 GB RAM, 4 cores) and drives it with synthesised touch events | Touch detection; low tier auto-selected with grain/glow off and DPR capped; rotate gate in portrait; twin-stick deadzone, rim clamping and full-tilt sprint; **the survivor physically moves around the map on thumb power**; aim stick + auto-fire; simultaneous multi-touch; every cluster button; ability cooldown ring; aim assist locking its front-biased target; GFX cycling; pause; auto-pause on rotate; a **second boot with PointerEvent removed** to exercise the TouchEvent fallback; and an **iPhone-profile boot proving the Add-to-Home-Screen hint appears when there is no fullscreen API, is dismissible, and is remembered** — **99 checks** |
 | **loot** | Headless sim-level coverage of the whole loot system, with a seeded RNG so the statistical tests can't flake | Deterministic breakable seeding; destruction by melee, bullet and overkill; exactly-one-drop guarantee; tier distribution measured over many rolls; per-container character (crates favour weapons, barrels favour the rare tier); barrel detonation, chaining and mass-detonation without stack overflow; auto-pickup vs slotted pickup; the 2-slot inventory (swap, duplicate-gun-to-ammo, third-gun-drop); throwable stack caps, fuses, molotov fire pools, bomb blasts; kevlar absorb; cross-stage carry-over and defeat wiping it; snapshot fields; plus a 45-second "loot goblin" stability run — **122 checks** |
-| **deploy** | Static + live checks of the render.com contract | Blueprint fields, package scripts, `PORT`/`0.0.0.0`/SIGTERM/exception guards, no-cache static serving, no hard-coded host in the client, `wss://` upgrade on HTTPS, mobile viewport metas and safe-area insets, no third-party origins; then **spawns the server on an injected port**, hits `/health`, asserts a clean exit 0 on SIGTERM, and proves **nothing outside `/client` and `/core` is publicly downloadable** — `package.json`, `render.yaml`, `server/index.js`, the tests, `.git/config` and any `.env` must all 404 — **65 checks** |
+| **deploy** | Static + live checks of the render.com contract | Blueprint fields, package scripts, `PORT`/`0.0.0.0`/SIGTERM/exception guards, no-cache static serving, no hard-coded host in the client, `wss://` upgrade on HTTPS, mobile viewport metas and safe-area insets, no third-party origins; then **spawns the server on an injected port**, hits `/health`, asserts a clean exit 0 on SIGTERM, and proves **nothing outside `/client` and `/core` is publicly downloadable** — `package.json`, `render.yaml`, `server/index.js`, the tests, `.git/config` and any `.env` must all 404; and the PWA plumbing (manifest with fullscreen+landscape, icon files, `100dvh`) is present **and served with correct content types** — **80 checks** |
 
-Current state: **all seven suites green** — 67 + 87 + 87 + 122 + 65 = 428 counted checks, plus the balance and dom contracts.
+Current state: **all seven suites green** — 67 + 98 + 99 + 122 + 80 = 466 counted checks, plus the balance and dom contracts.
 
 `npm test` always spawns its **own** server on a free port (starting at 31777)
 and hands that port to the suites, so it can never accidentally test a stale

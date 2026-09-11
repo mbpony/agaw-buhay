@@ -138,6 +138,7 @@ function bootClient(o) {
     setProp(win.navigator, 'maxTouchPoints', 5);
     win.ontouchstart = function () {};
   }
+  if (o.platform) setProp(win.navigator, 'platform', o.platform);
   if (o.memory !== undefined) setProp(win.navigator, 'deviceMemory', o.memory);
   if (o.cores !== undefined) setProp(win.navigator, 'hardwareConcurrency', o.cores);
   if (o.screen) { setProp(win.screen, 'width', o.screen[0]); setProp(win.screen, 'height', o.screen[1]); }

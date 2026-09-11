@@ -70,6 +70,21 @@ const get = (port, p) => new Promise(res => {
   ok(/env\(safe-area-inset/.test(html), 'HUD and pads respect safe-area insets');
   ok(!/https?:\/\/(?!127|localhost)[\w.-]+\//.test(html.replace(/www\.w3\.org[^"']*/g, '')), 'index.html loads no third-party origin (works offline)');
 
+  // Fullscreen on a phone: iPhone Safari has no fullscreen API, so the real
+  // chrome-free path is an installed PWA / home-screen launch. Verify the whole
+  // plumbing for that exists and is wired up.
+  ok(/rel="manifest"/.test(html), 'declares a web app manifest');
+  ok(/rel="apple-touch-icon"/.test(html), 'declares an iOS home-screen icon');
+  ok(/100dvh/.test(html), 'uses the dynamic viewport height so collapsing iOS bars never crop the game');
+  ok(/#ioshint/.test(html), 'ships styles for the iPhone Add-to-Home-Screen hint');
+  ok(/isStandalone\(\)/.test(main) && /canFullscreen\(\)/.test(main), 'client detects standalone mode and a missing fullscreen API');
+  const mani = JSON.parse(read('client/manifest.webmanifest'));
+  ok(mani.display === 'fullscreen', 'manifest asks for fullscreen display', mani.display);
+  ok(mani.orientation === 'landscape', 'manifest locks landscape', mani.orientation);
+  ok((mani.icons || []).length >= 2, 'manifest ships icons (' + (mani.icons || []).length + ')');
+  for (const ic of mani.icons || []) ok(fs.existsSync(path.join(ROOT, 'client', ic.src)), 'icon file exists: ' + ic.src);
+  ok(fs.existsSync(path.join(ROOT, 'client', 'apple-touch-icon.png')), 'apple-touch-icon file exists');
+
   const PORT = 3987;
   const child0 = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: Object.assign({}, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'pipe']
@@ -144,6 +159,14 @@ const get = (port, p) => new Promise(res => {
     }
     const up = await get(PORT, '/uploads/AGAW_BUHAY_SURVIVAL_DOCUMENTATION.pdf');
     ok(up.status === 404 || up.status === 403, 'the design doc is not downloadable from the game server', up.status);
+
+    console.log('\n== PWA assets are served ==');
+    const mf = await get(PORT, '/client/manifest.webmanifest');
+    ok(mf.status === 200 && /manifest\+json/.test((mf.headers || {})['content-type'] || ''), 'manifest served as application/manifest+json', mf.status + ' ' + ((mf.headers || {})['content-type'] || ''));
+    const ic1 = await get(PORT, '/client/icon-192.png');
+    ok(ic1.status === 200 && /image\/png/.test((ic1.headers || {})['content-type'] || ''), 'icon-192 served as image/png', ic1.status + ' ' + ((ic1.headers || {})['content-type'] || ''));
+    const ic2 = await get(PORT, '/client/apple-touch-icon.png');
+    ok(ic2.status === 200 && ic2.body.length > 200, 'apple-touch-icon served', ic2.status);
   }
   // graceful shutdown
   child.kill('SIGTERM');

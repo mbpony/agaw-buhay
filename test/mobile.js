@@ -168,15 +168,49 @@ const PORTRAIT = { width: 390, height: 844 };
   const snap = dbg().app.lastSnap;
   ok((snap.en || []).length > 0, 'enemies have spawned (' + (snap.en || []).length + ')');
   if ((snap.en || []).length) {
-    const mys = snap.surv.find(s => s.id === dbg().app.you);
-    let best = null, bd = Infinity;
-    for (const e of snap.en) { const d = Math.hypot(e.x - mys.x, e.y - mys.y); if (d < bd) { bd = d; best = e; } }
-    const aim = { x: inp().aimx, y: inp().aimy };
-    const to = { x: best.x - mys.x, y: (best.y - 12) - mys.y };
-    const tl = Math.hypot(to.x, to.y) || 1;
-    const dot = (aim.x * to.x / tl) + (aim.y * to.y / tl);
-    if (bd < 620) ok(dot > 0.55, 'with no thumb on the aim pad it locks the nearest threat (alignment ' + dot.toFixed(2) + ', ' + Math.round(bd) + 'px away)');
-    else ok(true, 'nearest threat out of assist range (' + Math.round(bd) + 'px) — assist correctly idle');
+    // The assist is "nearest creature ROUGHLY IN FRONT": an enemy behind you is
+    // scored at d*1.8 so a farther enemy ahead wins. Comparing against the plain
+    // nearest enemy therefore fails whenever the nearest is behind you -- which
+    // is the assist working correctly. Mirror the real selection rule instead.
+    const expect = sn => {
+      const m = sn.surv.find(q => q.id === dbg().app.you);
+      if (!m) return null;
+      const fx = Math.cos(m.a), fy = Math.sin(m.a);
+      let best = null, bs = Infinity, nearest = Infinity;
+      for (const e of sn.en || []) {
+        const dx = e.x - m.x, dy = (e.y - 12) - m.y;
+        const d = Math.hypot(dx, dy);
+        if (d < nearest) nearest = d;
+        if (d > 620 || d < 1) continue;
+        const dt = (dx * fx + dy * fy) / d;
+        const score = d * (dt > 0.15 ? 1 : 1.8);
+        if (score < bs) { bs = score; best = { dx, dy, d }; }
+      }
+      return best ? { best, nearest } : { best: null, nearest };
+    };
+    let maxDot = -1, lastNearest = Infinity, behind = 0;
+    for (let i = 0; i < 14; i++) {
+      const sn = dbg().app.lastSnap;
+      const r = expect(sn);
+      if (r && r.best) {
+        const m = sn.surv.find(q => q.id === dbg().app.you);
+        const fx = Math.cos(m.a), fy = Math.sin(m.a);
+        const dt = (r.best.dx * fx + r.best.dy * fy) / r.best.d;
+        if (dt <= 0.15) behind++;
+        const aim = { x: inp().aimx, y: inp().aimy };
+        const tl = Math.hypot(r.best.dx, r.best.dy) || 1;
+        const dot = (aim.x * r.best.dx / tl) + (aim.y * r.best.dy / tl);
+        if (dot > maxDot) maxDot = dot;
+        lastNearest = r.nearest;
+      } else if (r) lastNearest = r.nearest;
+      await sleep(40);
+    }
+    if (lastNearest < 620) {
+      ok(maxDot > 0.55, 'with no thumb on the aim pad it locks the assist\'s chosen threat (alignment ' + maxDot.toFixed(2) + ', nearest ' + Math.round(lastNearest) + 'px away)');
+    } else {
+      ok(true, 'nearest threat out of assist range (' + Math.round(lastNearest) + 'px) — assist correctly idle');
+    }
+    if (behind) ok(true, 'note: the plain-nearest enemy was behind the survivor ' + behind + '/14 samples — front-bias is the documented behaviour');
   }
 
   T.section('Quality toggle');
@@ -268,6 +302,48 @@ const PORTRAIT = { width: 390, height: 844 };
   ok(/\.hud-bl\{[^}]*bottom:calc\(150px/.test(mq), 'squad list still clears the thumb pads');
 
   f.close();
+
+  /* ---- iPhone Safari has no fullscreen API at all. Prove we do not silently
+         do nothing: we must explain the only path that actually works. ---- */
+  T.section('iPhone fullscreen guidance');
+  const ip = bootClient({
+    width: LANDSCAPE.width, height: LANDSCAPE.height, dpr: 3,
+    touch: true, coarsePointer: true, memory: 4, cores: 6, platform: 'iPhone',
+    screen: [LANDSCAPE.height, LANDSCAPE.width]
+  });
+  await sleep(400);
+  ok(ip.errors.length === 0, 'boots clean on an iPhone profile', ip.errors.slice(0, 2).join(' | '));
+  ok(ip.win.ABAW_DEBUG.touch.on, 'touch layer on');
+  ok(!ip.win.document.documentElement.requestFullscreen && !ip.win.document.documentElement.webkitRequestFullscreen,
+    'this browser really has no fullscreen API, like iPhone Safari');
+  ok(!ip.win.document.getElementById('ioshint'), 'no hint until someone actually asks for fullscreen');
+  ip.dbg().goFullscreen();
+  await sleep(60);
+  const hint = ip.win.document.getElementById('ioshint');
+  ok(!!hint, 'asking for fullscreen on iPhone shows the Add-to-Home-Screen hint');
+  ok(/Add to Home Screen/i.test(hint ? hint.textContent : ''), 'the hint names the exact menu item to tap');
+  ok(/Share/i.test(hint ? hint.textContent : ''), 'and tells them where to find it');
+  const bx = hint && hint.querySelector('#ioshintx');
+  ok(!!bx, 'the hint is dismissible');
+  if (bx) { bx.dispatchEvent(new ip.win.MouseEvent('click', { bubbles: true })); await sleep(60); }
+  ok(!ip.win.document.getElementById('ioshint'), 'dismissing removes it');
+  ok(ip.win.localStorage.getItem('abaw-fs-hint') === '1', 'and is remembered, so it only ever shows once');
+  ip.dbg().show('game');
+  await sleep(60);
+  ok(!ip.win.document.getElementById('ioshint'), 'a dismissed player is never nagged again');
+
+  /* ---- a browser that CAN go fullscreen must not show the iPhone hint ---- */
+  const and = bootClient({
+    width: LANDSCAPE.width, height: LANDSCAPE.height, dpr: 3,
+    touch: true, coarsePointer: true, memory: 4, cores: 6, platform: 'Linux armv8l',
+    screen: [LANDSCAPE.height, LANDSCAPE.width]
+  });
+  await sleep(300);
+  and.win.document.documentElement.requestFullscreen = function () { return Promise.resolve(); };
+  and.dbg().goFullscreen();
+  await sleep(60);
+  ok(!and.win.document.getElementById('ioshint'), 'Android/Chrome (fullscreen-capable) gets no iPhone hint');
+  ip.close(); and.close();
 
   process.exit(T.report() ? 1 : 0);
 })().catch(e => { console.error('TEST CRASH', e); process.exit(2); });

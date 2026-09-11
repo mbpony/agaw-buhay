@@ -39,6 +39,7 @@
     $('hud').classList.toggle('hidden', name !== 'game');
     const tl = $('touch');
     if (tl) tl.classList.toggle('on', name === 'game' && touch.on && !app.paused);
+    if (name === 'game' && touch.on) maybeIosHint();
     app.screen = name;
     if (name === 'game') goFullscreen();
     if (name !== 'game') { touch.fire = false; touch.use = false; touch.move.id = null; touch.aim.id = null; touch.move.x = touch.move.y = touch.aim.x = touch.aim.y = 0; }
@@ -560,19 +561,70 @@
     addEventListener(UP, release); addEventListener(CANCEL, release);
     el.addEventListener('contextmenu', e => e.preventDefault());
   }
-  /** Best-effort immersive fullscreen + landscape lock (Android/Chrome; iOS ignores it safely). */
+  /* iPhone/iPad report odd platform strings: iPadOS says "MacIntel", so pair a
+     Mac platform with touch points. */
+  function isIOS() {
+    const p = navigator.platform || navigator.userAgent || '';
+    if (/iPhone|iPod|iPad/.test(p)) return true;
+    return /Mac/.test(p) && (navigator.maxTouchPoints || 0) > 1;
+  }
+  function isStandalone() {
+    if (navigator.standalone === true) return true;
+    if (!window.matchMedia) return false;
+    return matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
+  }
+  function canFullscreen() {
+    const el = document.documentElement;
+    return !!(el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
+  }
+
+  /** Best-effort immersive fullscreen + landscape lock.
+      Browsers only allow this from a user gesture and frequently refuse the
+      first attempt, so instead of trying exactly once we keep trying on every
+      gesture until one sticks. On iPhone Safari there is no fullscreen API at
+      all, so goFullscreen() hands over to the Add-to-Home-Screen hint. */
   function goFullscreen() {
-    if (!touch.on || touch.fsTried) return;
-    touch.fsTried = true;
+    if (!touch.on || touch.fsOk) return;
+    if (!canFullscreen()) { maybeIosHint(); return; }
     const el = document.documentElement;
     const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
     if (req && !document.fullscreenElement && !document.webkitFullscreenElement) {
-      try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+      try {
+        const p = req.call(el);
+        if (p && p.then) p.then(() => { touch.fsOk = true; }, () => {});
+        else touch.fsOk = true;
+      } catch (e) {}
     }
     try {
       const o = window.screen && screen.orientation;
       if (o && o.lock) { const p = o.lock('landscape'); if (p && p.catch) p.catch(() => {}); }
     } catch (e) {}
+  }
+
+  /** iPhone Safari cannot hide its own bar from a web page -- that is an Apple
+      platform rule, not something code can override. The one true fullscreen on
+      iPhone is Add to Home Screen, which our manifest + apple-mobile-web-app
+      meta tags already support. So when someone on iPhone asks for fullscreen,
+      tell them the two taps that actually work instead of doing nothing. */
+  function maybeIosHint() {
+    if (!touch.on || !isIOS() || isStandalone() || canFullscreen()) return;
+    try { if (localStorage.getItem('abaw-fs-hint') === '1') return; } catch (e) {}
+    if (document.getElementById('ioshint')) return;
+    const bar = document.createElement('div');
+    bar.id = 'ioshint';
+    bar.innerHTML =
+      '<b>Tunay na full screen sa iPhone</b>' +
+      '<span>Hindi kayang itago ng kahit anong web page ang top bar ng Safari. ' +
+      'Pindutin ang <b>Share</b> &#8594; <b>Add to Home Screen</b>, tapos buksan ang icon mula sa home screen: ' +
+      'wala nang Safari bar, landscape agad.</span>' +
+      '<span class="en">iPhone Safari will not let a web page hide its own bar. Tap ' +
+      'Share &#8594; "Add to Home Screen", then launch the icon from your home screen for a true chrome-free, landscape game.</span>' +
+      '<button id="ioshintx">OK, gets ko</button>';
+    document.body.appendChild(bar);
+    const kill = () => { if (bar.parentNode) bar.parentNode.removeChild(bar); try { localStorage.setItem('abaw-fs-hint', '1'); } catch (e) {} };
+    const bx = bar.querySelector('#ioshintx');
+    if (bx) bx.addEventListener('click', kill);
+    setTimeout(kill, 16000);
   }
   function defaultTier() {
     if (!touch.on) return 'high';
@@ -640,13 +692,19 @@
     document.addEventListener('dblclick', e => { if (touch.on) e.preventDefault(); });
     addEventListener('contextmenu', e => { if (touch.on && app.screen === 'game') e.preventDefault(); });
     addEventListener('resize', () => updateOrientation());
+    if (window.visualViewport) {
+      visualViewport.addEventListener('resize', () => { renderer.resize(); updateOrientation(); });
+    }
     addEventListener('orientationchange', () => setTimeout(() => { updateOrientation(); renderer.resize(); }, 240));
     updateOrientation();
     if (settings.qualityAuto === undefined) settings.qualityAuto = true;
     setQuality(settings.quality || defaultTier(), true);
     if (!touch.on) return;
     // any first tap anywhere should try to go immersive
-    addEventListener(DOWN, () => goFullscreen(), { once: true });
+    // not { once: true }: many browsers refuse the first request, so keep
+    // asking on every gesture until one is accepted (goFullscreen early-returns
+    // once it has succeeded, so this is cheap)
+    addEventListener(DOWN, () => goFullscreen(), { passive: true });
   }
 
   const input = { mx: 0, my: 0, aimx: 1, aimy: 0, fire: false, sprint: false, reload: false, ability: false, interact: false, melee: false, touchX: 0, touchY: 0 };
@@ -1030,7 +1088,7 @@
     tog('setFps', v => { settings.fps = v; renderer.opts.fps = v; const f = $('fps'); if (f) f.style.display = v ? 'block' : 'none'; save(); });
     tog('setAutoQ', v => { settings.qualityAuto = v; save(); if (v) renderer.slowFrames = 0; });
     $('setQual').onchange = e => { settings.qualityAuto = false; setQuality(e.target.value); save(); };
-    click('btnFull', () => { touch.fsTried = false; goFullscreen(); toast('Full screen requested'); });
+    click('btnFull', () => { touch.fsOk = false; goFullscreen(); if (canFullscreen()) toast('Full screen requested'); });
     $('setVol').oninput = e => { settings.vol = e.target.value / 100; AU.setVolume(settings.vol); $('volVal').textContent = e.target.value + '%'; save(); };
     $('setVol').value = Math.round(settings.vol * 100);
     $('volVal').textContent = Math.round(settings.vol * 100) + '%';

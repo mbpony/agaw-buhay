@@ -187,6 +187,71 @@ const ok = T.ok, sleep = T.sleep;
     ok(errors.length === 0, 'no errors across the whole loot flow', errors.slice(0, 3).join(' | '));
   }
 
+  T.section('Per-player camera');
+  {
+    const dbg = win.ABAW_DEBUG, sim = dbg.app.sim, rend = dbg.renderer;
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const alive = sim.aliveSurvivors();
+    ok(alive.length >= 2, 'at least two survivors to separate (' + alive.length + ')');
+    const A = alive[0], B = alive[1];
+
+    // Drag B a long way from the rest of the squad. Two hazards when doing this
+    // to a live sim: (1) the target must be walkable or the sim shoves B back,
+    // and (2) bots have an anti-soft-lock recovery that teleports them to the
+    // objective once stuckT passes 9 -- pinning a bot in place trips it. So find
+    // real floor and hold stuckT at zero for the duration.
+    let spot = null;
+    for (let r = 2200; r >= 800 && !spot; r -= 150) {
+      for (let k = 0; k < 32 && !spot; k++) {
+        const ang = k / 32 * Math.PI * 2;
+        const p = sim.findWalkable(A.x + Math.cos(ang) * r, A.y + Math.sin(ang) * r);
+        if (p && Math.hypot(p.x - A.x, p.y - A.y) > 1000) spot = p;
+      }
+    }
+    ok(!!spot, 'found walkable floor far from the squad to test separation');
+    if (!spot) { rend.youId = A.id; throw new Error('no far spot'); }
+    const AX = A.x, AY = A.y, BX = spot.x, BY = spot.y;
+    const calm = v => { if (v.bot) { v.bot.stuckT = 0; v.bot.chkT = 0.5; } };
+    const pin = async ms => { const t0 = Date.now(); while (Date.now() - t0 < ms) { A.x = AX; A.y = AY; B.x = BX; B.y = BY; calm(A); calm(B); await sleep(30); } };
+    const squadCam = () => ({ x: sim.cam.x, y: sim.cam.y, z: sim.cam.zoom });
+
+    await pin(700);
+    const wasYou = rend.youId;
+    rend.youId = A.id;
+    await pin(600);
+    const camA = { x: rend.cam.x, y: rend.cam.y, z: rend.cam.zoom };
+    const posA = { x: A.x, y: A.y };
+
+    rend.youId = B.id;
+    await pin(600);
+    const camB = { x: rend.cam.x, y: rend.cam.y, z: rend.cam.zoom };
+    const posB = { x: B.x, y: B.y };
+    const shared = squadCam();
+
+    ok(dist(camA, posA) < 90, 'player A\'s camera sits on player A (' + Math.round(camA.x) + ',' + Math.round(camA.y) + ' vs ' + Math.round(posA.x) + ',' + Math.round(posA.y) + ')');
+    ok(dist(camB, posB) < 90, 'player B\'s camera sits on player B (' + Math.round(camB.x) + ',' + Math.round(camB.y) + ' vs ' + Math.round(posB.x) + ',' + Math.round(posB.y) + ')');
+    ok(dist(camA, camB) > 900, 'so the two players get genuinely different views (' + Math.round(dist(camA, camB)) + 'px apart)');
+    ok(dist(camA, shared) > 200 && dist(camB, shared) > 200,
+      'neither view is the shared squad centroid any more (sim cam is ' + Math.round(dist(camA, shared)) + 'px from A, ' + Math.round(dist(camB, shared)) + 'px from B)');
+    ok(camA.z >= 0.95 && camB.z >= 0.95,
+      'zoom stays readable when you split up (A ' + camA.z.toFixed(2) + ', B ' + camB.z.toFixed(2) + ') instead of collapsing to the shared ' + shared.z.toFixed(2));
+
+    // the actual complaint: a player who runs off must still see themselves
+    const seesSelf = (cam, p) => Math.abs(p.x - cam.x) < rend.viewW / 2 && Math.abs(p.y - cam.y) < rend.viewH / 2;
+    ok(seesSelf(camB, posB), 'the player who ran far ahead can still see their own character');
+    ok(seesSelf(camA, posA), 'and so can the one who stayed behind');
+
+    // dead players should watch a living teammate rather than their own corpse
+    B.hp = 0; B.dead = true; B.dd = 1;
+    rend.youId = B.id;
+    await sleep(700);
+    const camDead = { x: rend.cam.x, y: rend.cam.y };
+    ok(dist(camDead, { x: A.x, y: A.y }) < 400, 'a dead player\'s camera follows a living teammate instead of the corpse');
+    B.dead = false; B.dd = 0; B.hp = B.maxHp;
+    rend.youId = wasYou;
+    ok(!dbg.app.errors || dbg.app.errors.length === 0, 'no errors while switching camera owners');
+  }
+
   T.section('Pause / scoreboard / mute / settings');
   c.key('Escape'); await sleep(120);
   ok(c.visible('sc-pause'), 'Esc opens the pause menu');

@@ -405,11 +405,45 @@
       this.time += dt;
       this.consumeFx(snap);
 
-      // camera
+      /* ---- camera: EVERY PLAYER GETS THEIR OWN ----
+         snap.cam is the SQUAD camera the sim computes: it averages the position
+         of every alive survivor and zooms out (down to 0.62) as they spread
+         apart. Broadcasting that meant all four players watched one shared
+         view, so anyone who split from the group drifted to the edge of the
+         screen or off it completely -- you could not see your own character.
+         Each client now centres on its own survivor. The sim camera is kept
+         only for shake and as a fallback until we know who we are. */
       const c = snap.cam;
-      this.cam.x = lerp(this.cam.x, c.x, this.localMode ? 1 : Math.min(1, dt * 22));
-      this.cam.y = lerp(this.cam.y, c.y, this.localMode ? 1 : Math.min(1, dt * 22));
-      this.cam.zoom = lerp(this.cam.zoom, c.z, Math.min(1, dt * 6));
+      const mine = this.youId ? ents.surv.find(e => e.id === this.youId) : null;
+      let tx, ty;
+      if (mine && !mine.dd) {
+        // ents.surv already carries the predicted position for the local player
+        tx = mine.x; ty = mine.y;
+      } else if (mine) {
+        // dead: follow the nearest living teammate rather than your own corpse
+        let best = null, bd = Infinity;
+        for (const q of ents.surv) {
+          if (q.dd || q.id === mine.id) continue;
+          const d = (q.x - mine.x) ** 2 + (q.y - mine.y) ** 2;
+          if (d < bd) { bd = d; best = q; }
+        }
+        tx = best ? best.x : mine.x; ty = best ? best.y : mine.y;
+      } else {
+        tx = c.x; ty = c.y;
+      }
+      // zoom from YOUR neighbourhood only -- the old formula used the whole
+      // squad's spread, so one person running ahead zoomed everybody out
+      let far = 0;
+      for (const q of ents.surv) {
+        if (q.dd || (mine && q.id === mine.id)) continue;
+        const d = Math.hypot(q.x - tx, q.y - ty);
+        if (d < 900 && d > far) far = d;
+      }
+      const tz = clamp(1.30 - far / 2400, 0.95, 1.30);
+      const ease = this.localMode ? 1 : Math.min(1, dt * 22);
+      this.cam.x = lerp(this.cam.x, tx, ease);
+      this.cam.y = lerp(this.cam.y, ty, ease);
+      this.cam.zoom = lerp(this.cam.zoom, tz, Math.min(1, dt * 6));
       this.shake = this.opts.shake ? c.sh : 0;
 
       const ctx = this.ctx;
