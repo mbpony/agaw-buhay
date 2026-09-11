@@ -16,7 +16,7 @@ const ok = (cond, label, extra) => {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const get = path => new Promise((res, rej) => {
   http.get({ host: HOST, port: PORT, path }, r => {
-    let b = ''; r.on('data', d => b += d); r.on('end', () => res({ status: r.statusCode, body: b, type: r.headers['content-type'] }));
+    let b = ''; r.on('data', d => b += d); r.on('end', () => res({ status: r.statusCode, body: b, type: r.headers['content-type'], loc: r.headers.location }));
   }).on('error', rej);
 });
 
@@ -48,9 +48,16 @@ class Client {
 
 (async () => {
   console.log('\n== HTTP ==');
-  const idx = await get('/');
-  ok(idx.status === 200 && /AGAW-BUHAY/i.test(idx.body), 'GET / serves the game shell (' + idx.body.length + ' bytes)', idx.status);
-  ok(/text\/html/.test(idx.type || ''), 'correct content-type for /');
+  // "/" deliberately 302-redirects into /client/ so the page's RELATIVE script
+  // paths (../core/data.js, audio.js) resolve. Serving the shell AT "/" makes a
+  // browser request /audio.js and 404, which is exactly the unplayable-deploy bug.
+  // This assertion used to expect a 200 here and only passed because the runner
+  // was reusing a stale server from before that fix.
+  const red = await get('/');
+  ok(red.status === 302 && red.loc === '/client/index.html', 'GET / redirects into /client/', red.status + ' -> ' + red.loc);
+  const idx = await get('/client/index.html');
+  ok(idx.status === 200 && /AGAW-BUHAY/i.test(idx.body), 'and that document serves the game shell (' + idx.body.length + ' bytes)', idx.status);
+  ok(/text\/html/.test(idx.type || ''), 'correct content-type for the shell', idx.type);
   for (const f of ['/core/data.js', '/core/level.js', '/core/sim.js', '/client/render.js', '/client/audio.js', '/client/main.js']) {
     const r = await get(f);
     ok(r.status === 200 && r.body.length > 500, 'GET ' + f, r.status);

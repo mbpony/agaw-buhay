@@ -22,3 +22,37 @@ if(missingL.length) console.log('NOTE listener targets missing:', missingL.join(
 // screens
 const screens=[...html.matchAll(/id="(sc-[\w-]+)"/g)].map(m=>m[1]);
 console.log('screens:', screens.join(', '));
+
+// --- boot-check globals must really exist ---------------------------------
+// index.html's belt-and-braces banner names one global per module and shouts if
+// it is missing. A wrong name makes it cry wolf on EVERY page load even when the
+// game boots fine -- it once checked window.DATA, which nothing in the project
+// ever defines (the real global is ABAW_DATA). Cross-reference the table against
+// what each file actually publishes.
+const path=require('path');
+console.log('');
+console.log('== Boot-check module table ==');
+const modBlock=html.match(/var MODULES = \[([\s\S]*?)\];/);
+if(!modBlock){ console.log('  \u2717 MODULES table not found in index.html'); process.exit(1); }
+const mods=[...modBlock[1].matchAll(/\['([^']+)',\s*'([^']+)'\]/g)].map(m=>({file:m[1],global:m[2]}));
+if(!mods.length){ console.log('  \u2717 MODULES table parsed to zero entries'); process.exit(1); }
+// script srcs are relative to /client/, so ../core/x.js -> core/x.js
+const srcs=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1].replace(/^\.\.\//,''));
+const resolve=f=>path.join(process.cwd(), f.startsWith('core/')||f.startsWith('server/')?f:path.join('client',f));
+let bad=0;
+for(const m of mods){
+  const p=resolve(m.file);
+  const exists=fs.existsSync(p);
+  const body=exists?fs.readFileSync(p,'utf8'):'';
+  const assigned=new RegExp('(root|window|self|globalThis)\\.'+m.global+'\\s*=').test(body);
+  const inPage=srcs.indexOf(m.file)!==-1;
+  const good=exists&&assigned&&inPage;
+  if(!good) bad++;
+  console.log('  '+(good?'\u2713':'\u2717')+' '+m.file.padEnd(16)+' -> '+m.global.padEnd(12)+
+    '  file='+exists+'  assigns-global='+assigned+'  loaded-by-page='+inPage);
+}
+for(const sc of srcs){
+  if(!mods.some(m=>m.file===sc)){ console.log('  \u2717 '+sc+' is loaded by the page but missing from the boot check'); bad++; }
+}
+if(bad){ console.log('BOOT-CHECK FAILURES: '+bad); process.exit(1); }
+console.log('boot check covers all '+srcs.length+' scripts; every named global is real');

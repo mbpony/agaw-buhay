@@ -692,13 +692,30 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
     box('Unhandled error', String((e.reason && e.reason.stack) || e.reason));
   });
   // Belt and braces: after load, confirm the modules actually arrived.
+  // Each file publishes its OWN global, so check the real names. This used to
+  // test window.DATA, which nothing in the project ever defines -- so the banner
+  // fired on every single page load even when the game booted perfectly.
+  var MODULES = [
+    ['core/data.js', 'ABAW_DATA'],
+    ['core/level.js', 'ABAW_LEVEL'],
+    ['core/sim.js', 'ABAW_SIM'],
+    ['audio.js', 'ABAW_AUDIO'],
+    ['render.js', 'ABAW_RENDER'],
+    ['main.js', 'ABAW_DEBUG']
+  ];
   window.addEventListener('load', function () {
     setTimeout(function () {
-      if (typeof window.DATA === 'undefined' || typeof window.ABAW_DEBUG === 'undefined') {
+      var lines = [], missing = [];
+      for (var i = 0; i < MODULES.length; i++) {
+        var there = typeof window[MODULES[i][1]] !== 'undefined';
+        lines.push(MODULES[i][0] + '  ->  ' + MODULES[i][1] + ': ' + there);
+        if (!there) missing.push(MODULES[i][0]);
+      }
+      if (missing.length) {
         box('Hindi nag-start ang script ng laro / Game script did not start',
-          'core/data.js loaded: ' + (typeof window.DATA !== 'undefined') +
-          '\nclient/main.js loaded: ' + (typeof window.ABAW_DEBUG !== 'undefined') +
-          '\n\nPage URL: ' + location.href);
+          lines.join('\n') +
+          '\n\nMissing: ' + missing.join(', ') +
+          '\nPage URL: ' + location.href);
       }
     }, 1500);
   });

@@ -25,6 +25,16 @@ const ok = T.ok, sleep = T.sleep;
   ok(!doc.body.classList.contains('touch'), 'desktop boot does not enable the touch layer');
   ok(win.ABAW_DEBUG.renderer.tier === 'high', 'desktop starts on the high tier');
 
+  // The boot-error banner must stay SILENT when everything really loaded. It once
+  // checked window.DATA, which nothing in the project defines, so it fired on
+  // every single page load -- telling players the game had failed to start while
+  // the title screen sat there working perfectly behind it.
+  win.dispatchEvent(new win.Event('load'));
+  await sleep(1900);
+  const banner = doc.getElementById('booterr');
+  ok(!banner || !banner.textContent.trim(), 'the boot-error banner stays hidden on a healthy boot',
+    banner ? banner.textContent.replace(/\s+/g, ' ').slice(0, 200) : '');
+
   T.section('Server connection');
   await sleep(900);
   const netTxt = c.text('titleNet');
