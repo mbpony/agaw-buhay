@@ -28,6 +28,7 @@
     ping: 0, pingT: 0, lastSnap: null, ended: false, chatOpen: false, paused: false,
     // phase 2 client-side prediction: un-acked input samples + predicted own state
     iseq: 0, pend: [], curSample: null, pred: null, predOff: null, predSpeed: 0,
+    locked: false, lookDX: 0, look: dx => { app.lookDX += dx; },
     reconnecting: false, rejoinCode: null,
     yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
@@ -441,7 +442,18 @@
     if (e.code === 'KeyR') input.reload = false;
   });
   const canvas = $('game');
-  canvas.addEventListener('mousemove', e => { const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; mouse.seen = true;
+    if (!touch.on && renderer.fp && e.movementX) app.lookDX += e.movementX;   // mouse-look (locked or not)
+  });
+  // click the world to capture the mouse like a real FPS; Esc releases it
+  canvas.addEventListener('click', () => {
+    if (app.screen === 'game' && !touch.on && renderer.fp && !app.locked && canvas.requestPointerLock) {
+      try { canvas.requestPointerLock(); } catch (e) {}
+    }
+  });
+  document.addEventListener('pointerlockchange', () => { app.locked = document.pointerLockElement === canvas; });
+  document.addEventListener('pointerlockerror', () => { app.locked = false; });
   canvas.addEventListener('mousedown', e => { AU.init(); AU.resume(); if (e.button === 0) mouse.down = true; if (e.button === 2) input.melee = true; });
   addEventListener('mouseup', e => { if (e.button === 0) mouse.down = false; if (e.button === 2) input.melee = false; });
   canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -761,9 +773,16 @@
          which is what keeps an FP view from feeling like it swims. */
       let turn = 0;
       if (touch.on && touch.aim.id !== null) turn = Math.max(-1, Math.min(1, touch.aim.x));
-      else if (!touch.on) turn = Math.max(-1, Math.min(1, (mouse.x - renderer.w / 2) / (renderer.w / 2)));
+      if (!touch.on) {
+        if (keys.KeyQ || keys.ArrowLeft) turn -= 1;           // keyboard turn fallback
+        if (keys.KeyE || keys.ArrowRight) turn += 1;
+      }
       app.turn = turn;
-      app.yaw += turn * (touch.on ? 2.7 : 2.3) * (app.frameDt || 1 / 60);
+      if (!touch.on) {                                         // mouse-look: raw counts -> yaw
+        app.yaw += (app.lookDX || 0) * (settings.sens || 0.0026);
+        app.lookDX = 0;
+      }
+      if (turn) app.yaw += turn * (touch.on ? 2.7 : 2.3) * (app.frameDt || 1 / 60);
       const fwd = -my, str = mx;
       const cy = Math.cos(app.yaw), sy = Math.sin(app.yaw);
       input.mx = cy * fwd - sy * str;
@@ -779,9 +798,12 @@
     let aimed = false;
     const aimDeflect = touch.on && touch.aim.id !== null ? Math.hypot(touch.aim.x, touch.aim.y) : 0;
     if (FP) {
-      // you shoot where you look
-      input.aimx = Math.cos(app.yaw); input.aimy = Math.sin(app.yaw);
-      aimed = true;
+      // you shoot where you look... on touch, idle aim pad = bullet magnetism
+      if (touch.on && touch.aim.id === null && me) {
+        const t = assistTarget(me);
+        if (t) { input.aimx = t.dx / t.d; input.aimy = t.dy / t.d; aimed = true; }
+      }
+      if (!aimed) { input.aimx = Math.cos(app.yaw); input.aimy = Math.sin(app.yaw); aimed = true; }
     } else if (touch.on) {
       if (aimDeflect > 0.2) { input.aimx = touch.aim.x / aimDeflect; input.aimy = touch.aim.y / aimDeflect; aimed = true; }
       if (!aimed && touch.assist && me) {
@@ -860,6 +882,8 @@
   /* ================= HUD ================= */
   const hud = { el: {}, t: 0 };
   function updateHud(dt) {
+    const hudEl = $('hud');
+    if (hudEl) hudEl.classList.toggle('fpmode', !!renderer.fp);
     const s = app.lastSnap;
     if (!s) return;
     const me = meSurvivor();

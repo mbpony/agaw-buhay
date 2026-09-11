@@ -50,10 +50,21 @@ function makeCtx(W, H, buf) {
   };
   const ctx = {
     fillStyle: '#000', strokeStyle: '#000', lineWidth: 1, globalAlpha: 1, dpr: 1,
-    setTransform() {}, save() {}, restore() {},
+    setTransform() { this.m = [1, 0, 0, 1, 0, 0]; },
+    m: [1, 0, 0, 1, 0, 0], _ms: [],
+    save() { this._ms.push(this.m.slice()); },
+    restore() { if (this._ms.length) this.m = this._ms.pop(); },
+    tp(x, y) { const m = this.m; return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; },
+    translate(x, y) { const m = this.m; m[4] += m[0] * x + m[2] * y; m[5] += m[1] * x + m[3] * y; },
+    scale(sx, sy) { const m = this.m; m[0] *= sx; m[1] *= sx; m[2] *= sy; m[3] *= sy; },
+    rotate(r) { const m = this.m, c = Math.cos(r), s = Math.sin(r);
+      const a = m[0] * c + m[2] * s, b = m[1] * c + m[3] * s, cc = m[0] * -s + m[2] * c, d = m[1] * -s + m[3] * c;
+      m[0] = a; m[1] = b; m[2] = cc; m[3] = d; },
     createLinearGradient(x0, y0, x1, y1) { return { _g: 1, y0, y1, vert: Math.abs(x0 - x1) < 1, stops: [], addColorStop(o, c) { this.stops.push([o, parseColor(c)]); } }; },
     createRadialGradient() { return { _rad: 1, stops: [], addColorStop() {} }; },
     fillRect(x, y, w, h) {
+      const p0 = this.tp(x, y), p1 = this.tp(x + w, y + h);
+      x = Math.min(p0[0], p1[0]); y = Math.min(p0[1], p1[1]); w = Math.abs(p1[0] - p0[0]); h = Math.abs(p1[1] - p0[1]);
       const a = this.globalAlpha;
       const col = this.fillStyle;
       if (col && col._rad) return;                            // vignette: skip in preview
@@ -73,24 +84,49 @@ function makeCtx(W, H, buf) {
     },
     _path: [],
     beginPath() { this._path = []; },
-    ellipse(x, y, rx, ry) { this._path.push({ x, y, rx, ry }); },
-    arc(x, y, r) { this._path.push({ x, y, rx: r, ry: r }); },
+    ellipse(x, y, rx, ry) { const m = this.m, p = this.tp(x, y); this._path.push({ x: p[0], y: p[1], rx: rx * Math.hypot(m[0], m[1]), ry: ry * Math.hypot(m[2], m[3]) }); },
+    strokeRect() {},
+    rect() {},
+    clip() {},
+    fillText() {},
+    measureText() { return { width: 0 }; },
+    quadraticCurveTo(x, y, x2, y2) { this._path.push({ x: x2, y: y2, rx: 0, ry: 0 }); },
+    arc(x, y, r) { const m = this.m, p = this.tp(x, y), k = Math.hypot(m[0], m[1]); this._path.push({ x: p[0], y: p[1], rx: r * k, ry: r * k }); },
     fill() {
       const c = parseColor(this.fillStyle), a = this.globalAlpha * (c[3] === undefined ? 1 : c[3]);
+      if (this._poly && this._poly.length >= 3) {
+        const xs = this._poly.map(p => p[0]), ys = this._poly.map(p => p[1]);
+        const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
+        const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(H - 1, Math.ceil(Math.max(...ys)));
+        for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) if (this._pip(xx + 0.5, yy + 0.5, this._poly)) put(xx, yy, c[0], c[1], c[2], a);
+        this._poly = [];
+      }
       for (const e of this._path) for (let yy = Math.floor(e.y - e.ry); yy <= e.y + e.ry; yy++) for (let xx = Math.floor(e.x - e.rx); xx <= e.x + e.rx; xx++) {
         const nx = (xx - e.x) / Math.max(1e-6, e.rx), ny = (yy - e.y) / Math.max(1e-6, e.ry);
         if (nx * nx + ny * ny <= 1) put(xx, yy, c[0], c[1], c[2], a);
       }
       this._path = [];
     },
-    moveTo(x, y) { this._lx = x; this._ly = y; },
+    _poly: [],
+    moveTo(x, y) { const p = this.tp(x, y); this._lx = p[0]; this._ly = p[1]; this._poly = [p]; },
     lineTo(x, y) {
+      const q = this.tp(x, y); x = q[0]; y = q[1];
       const c = parseColor(this.strokeStyle), a = this.globalAlpha;
       const steps = Math.max(1, Math.hypot(x - this._lx, y - this._ly) | 0);
       for (let i = 0; i <= steps; i++) { const t = i / steps; put(this._lx + (x - this._lx) * t, this._ly + (y - this._ly) * t, c[0], c[1], c[2], a); }
       this._lx = x; this._ly = y;
+      if (this._poly) this._poly.push([x, y]);
     },
-    stroke() {}
+    closePath() { if (this._poly && this._poly.length) this._poly.push(this._poly[0]); },
+    stroke() { this._poly = []; },
+    _pip(x, y, poly) {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i], [xj, yj] = poly[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    },
   };
   return ctx;
 }

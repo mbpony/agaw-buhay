@@ -368,6 +368,7 @@ body.touch .tog.on:after{left:26px}
 body.touch .room{padding:13px}
 body.touch .prow{padding:12px}
 body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus */
+  #hud.fpmode .dupfp { display: none !important; }
 </style>
 </head>
 <body>
@@ -391,7 +392,7 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
       <div id="bossbar"><div class="bn">Manananggal</div><div class="bt"><i></i><u></u></div></div>
     </div>
     <div class="hud-bl" id="squad"></div>
-    <div class="hud-br">
+    <div class="hud-br dupfp">
       <div id="gear">
         <div class="gitem empty" id="gslot2"><b>2</b><span id="gslot2n">EMPTY</span><i id="gslot2a">[Q]</i></div>
         <div class="gitem empty" id="gthrow"><b id="gthrown">0</b><span id="gthrowk">NONE</span><i>[G]</i></div>

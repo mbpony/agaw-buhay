@@ -393,7 +393,7 @@
         this.damageEnemy(c.e, dmg, shooter, false, crit);
         hitSet.add(c.e.id);
         finalX = c.e.x; finalY = c.e.y;
-        this.pushFx('blood', { x: c.e.x, y: c.e.y, a: angle, n: crit ? 9 : 5, c: c.e.boss ? '#ff2d55' : '#8e1b1b' });
+        this.pushFx('blood', { x: c.e.x, y: c.e.y, a: angle, n: crit ? 9 : 5, c: c.e.boss ? '#ff2d55' : '#8e1b1b', by: shooter && shooter.id });
         if (pierceLeft-- <= 0) break;
       }
       // friendly fire on teammates

@@ -69,6 +69,16 @@ const ok = T.ok, sleep = T.sleep;
   $('sHero').value = 'jun'; $('sStage').value = '1-3'; $('sDiff').value = 'normal';
   c.click('btnSoloStart'); await sleep(900);
   ok(c.visible('hud'), 'HUD is up');
+  const D0 = win.ABAW_DEBUG;
+  if (D0 && D0.renderer.fp && D0.app && D0.app.look) {
+    const y0 = D0.app.yaw;
+    D0.app.look(400);                          // 400 raw pointer-lock counts right
+    await new Promise(r => setTimeout(r, 140));
+    ok(D0.app.yaw > y0 + 0.3, 'mouse-look (pointer-lock counts) turns the view right (' + (D0.app.yaw - y0).toFixed(2) + ' rad)');
+    D0.app.look(-400);
+    await new Promise(r => setTimeout(r, 140));
+    ok(D0.app.yaw < y0 + 0.3, 'and back left again');
+  }
   ok(!c.visible('sc-solo'), 'menu hidden once the run starts');
   const obj1 = c.text('objlabel');
   ok(obj1.length > 3 && obj1 !== '—', 'objective label rendered: "' + obj1 + '"');

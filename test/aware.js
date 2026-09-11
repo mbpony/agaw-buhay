@@ -86,5 +86,13 @@ console.log('\n== Off-view threat marker geometry ==');
   ok(inside, 'every bearing lands on the border margin, never off-screen');
 }
 
+console.log('\n== Compass heading math ==');
+{
+  ok(Math.abs(Rend.degFromYaw(0) - 90) < 0.01, 'yaw 0 (world +x) reads EAST');
+  ok(Math.abs(Rend.degFromYaw(Math.PI / 2) - 180) < 0.01, 'yaw +90deg reads SOUTH');
+  ok(Math.abs(Rend.degFromYaw(-Math.PI / 2) - 0) < 0.01, 'yaw -90deg reads NORTH');
+  ok(Rend.degFromYaw(Math.PI * 7) >= 0 && Rend.degFromYaw(Math.PI * 7) < 360, 'heading always normalised 0-360');
+}
+
 console.log('\n' + (fail ? 'AWARENESS SUITE FAILED' : 'AWARENESS SUITE OK') + ' — pass ' + pass + ' fail ' + fail);
 process.exit(fail ? 1 : 0);
