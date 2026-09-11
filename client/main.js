@@ -26,7 +26,8 @@
     screen: 'title', mode: null, ws: null, net: 'offline', room: null, you: null, hero: null,
     lobby: null, rooms: [], stage: null, level: null, sim: null, localRun: null,
     ping: 0, pingT: 0, lastSnap: null, ended: false, chatOpen: false, paused: false,
-    reconnecting: false, rejoinCode: null
+    reconnecting: false, rejoinCode: null,
+    yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
   const renderer = new Renderer($('game'));
   renderer.opts.shake = settings.shake; renderer.opts.dmg = settings.dmg; renderer.opts.fps = settings.fps;
@@ -709,6 +710,7 @@
 
   const input = { mx: 0, my: 0, aimx: 1, aimy: 0, fire: false, sprint: false, reload: false, ability: false, interact: false, melee: false, touchX: 0, touchY: 0 };
   function gatherInput() {
+    const FP = !!renderer.fp;
     let mx = 0, my = 0;
     if (keys.KeyW || keys.ArrowUp) my -= 1;
     if (keys.KeyS || keys.ArrowDown) my += 1;
@@ -720,13 +722,36 @@
     tilt = Math.hypot(mx, my);
     const l = tilt;
     if (l > 1) { mx /= l; my /= l; }
-    input.mx = mx; input.my = my;
+
+    if (FP) {
+      /* First person: the stick/keys give LOCAL move (my<0 = forward) and the
+         horizontal axis of the aim stick / mouse gives TURN. Yaw is owned by the
+         client and applied instantly (it is never waited-on from the server),
+         which is what keeps an FP view from feeling like it swims. */
+      let turn = 0;
+      if (touch.on && touch.aim.id !== null) turn = Math.max(-1, Math.min(1, touch.aim.x));
+      else if (!touch.on) turn = Math.max(-1, Math.min(1, (mouse.x - renderer.w / 2) / (renderer.w / 2)));
+      app.turn = turn;
+      app.yaw += turn * (touch.on ? 2.7 : 2.3) * (app.frameDt || 1 / 60);
+      const fwd = -my, str = mx;
+      const cy = Math.cos(app.yaw), sy = Math.sin(app.yaw);
+      input.mx = cy * fwd - sy * str;
+      input.my = sy * fwd + cy * str;
+      renderer.fpMoving = (Math.abs(fwd) + Math.abs(str)) > 0.1;
+      renderer.yaw = app.yaw;
+    } else {
+      input.mx = mx; input.my = my;
+    }
     const me = meSurvivor();
 
     // ---- aim ----
     let aimed = false;
     const aimDeflect = touch.on && touch.aim.id !== null ? Math.hypot(touch.aim.x, touch.aim.y) : 0;
-    if (touch.on) {
+    if (FP) {
+      // you shoot where you look
+      input.aimx = Math.cos(app.yaw); input.aimy = Math.sin(app.yaw);
+      aimed = true;
+    } else if (touch.on) {
       if (aimDeflect > 0.2) { input.aimx = touch.aim.x / aimDeflect; input.aimy = touch.aim.y / aimDeflect; aimed = true; }
       if (!aimed && touch.assist && me) {
         const t = assistTarget(me);
@@ -756,6 +781,7 @@
     }
     // auto-fire while the aim stick is deflected (thumb cannot reach FIRE and aim at once)
     input.fire = (touch.on ? (touch.fire || (touch.autoFire && aimDeflect > 0.2)) : mouse.down) && !app.paused;
+    if (renderer.fp) { if (input.fire && !app.prevFire) renderer.fpMuzzle = 0.07; app.prevFire = input.fire; }
     input.sprint = !!(keys.ShiftLeft || keys.ShiftRight) || (touch.on && (touch.sprint || tilt > 0.94));
     input.ability = !!keys.Space || touch.abilityT > 0;
     input.interact = !!keys.KeyE || touch.use;
@@ -948,7 +974,13 @@
   let last = performance.now(), netAcc = 0, pingAcc = 0;
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    app.frameDt = dt;
     if (app.screen === 'game') {
+      // seed the view yaw from wherever the survivor was already facing
+      if (!app.yawInit && app.lastSnap && app.lastSnap.surv) {
+        const m0 = app.lastSnap.surv.find(x => x.id === app.you);
+        if (m0) { app.yaw = m0.a; app.yawInit = true; }
+      }
       const inp = gatherInput();
       if (app.paused) { inp.fire = false; inp.mx = 0; inp.my = 0; }
       if (app.mode === 'local' && app.sim) {

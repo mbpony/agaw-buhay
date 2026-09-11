@@ -250,6 +250,9 @@
       this.level = null; this.atlas = null; this.chunks = new Chunks(this);
       this.fx = new Fx();
       this.cam = { x: 0, y: 0, zoom: 1 };
+      // first-person is the shipped view; flip to false to fall back to top-down
+      this.fp = true;
+      this.yaw = 0; this.zbuf = null; this.fpBob = 0; this.fpMuzzle = 0; this.fpMoving = false;
       this.shake = 0; this.flash = 0; this.hurt = 0; this.time = 0;
       this.buf = []; this.prev = null; this.curr = null;
       this.localMode = false;
@@ -447,6 +450,7 @@
       this.shake = this.opts.shake ? c.sh : 0;
 
       const ctx = this.ctx;
+      if (this.fp) { this.drawFirstPerson(ctx, ents, dt, snap); return; }
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       ctx.fillStyle = '#04050a'; ctx.fillRect(0, 0, this.w, this.h);
 
@@ -1904,6 +1908,166 @@
     }
 
     /* ---------- minimap ---------- */
+    /* ============================================================
+       FIRST-PERSON 2.5D  (raycaster + camera-facing billboards)
+       The sim remains a 2D authoritative model; this is purely a
+       projection of that same plane from eye height. Walls are
+       raycast column-by-column over the tile grid (DDA); every
+       actor/prop is a billboard sorted far-to-near and occluded by
+       the wall depth buffer. No 3D engine, no new assets.
+       ============================================================ */
+    fpColW() { return this.tier === 'low' ? 4 : this.tier === 'medium' ? 3 : 2; }
+
+    drawFirstPerson(ctx, ents, dt, snap) {
+      const W = this.w, H = this.h;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      const me = this.youId ? ents.surv.find(e => e.id === this.youId) : null;
+      const px = me ? me.x : this.cam.x, py = me ? me.y : this.cam.y;
+      const yaw = this.yaw || 0;
+      const fy = Math.sin(yaw), fx = Math.cos(yaw);      // forward
+      const rx = -fy, ry = fx;                            // right
+
+      // head bob tracks movement so walking feels like walking
+      this.fpBob = (this.fpBob || 0) + dt * (this.fpMoving ? 10 : 2.4);
+      const bob = Math.sin(this.fpBob) * (this.fpMoving ? 6 : 1.6);
+      const horizon = H * 0.5 + bob;
+
+      // ceiling + floor wash (cheap, and reads as a dark interior)
+      let g = ctx.createLinearGradient(0, 0, 0, horizon);
+      g.addColorStop(0, '#05060d'); g.addColorStop(1, '#141826');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, Math.max(1, horizon));
+      g = ctx.createLinearGradient(0, horizon, 0, H);
+      g.addColorStop(0, '#12141c'); g.addColorStop(1, '#2c2128');
+      ctx.fillStyle = g; ctx.fillRect(0, horizon, W, H - horizon);
+
+      const L = this.level;
+      if (!L || !L.grid) return;
+      const TS = L.tile, grid = L.grid, LW = L.w, LH = L.h;
+      const cols = Math.max(96, Math.floor(W / this.fpColW()));
+      const colW = W / cols;
+      if (!this.zbuf || this.zbuf.length !== cols) this.zbuf = new Float32Array(cols);
+      const plane = Math.tan(Math.PI / 6);   // 60 deg fov
+      const MAXD = 16 * TS;
+
+      const solidT = (tx, ty) => {
+        if (tx < 0 || ty < 0 || tx >= LW || ty >= LH) return 1;
+        const v = grid[ty * LW + tx]; return (v === 1 || v === 6) ? 1 : 0;
+      };
+
+      // ---- walls: one DDA ray per column ----
+      for (let c = 0; c < cols; c++) {
+        const camN = (2 * c / cols - 1) * plane;
+        const rdx = fx + rx * camN, rdy = fy + ry * camN;
+        let mapX = Math.floor(px / TS), mapY = Math.floor(py / TS);
+        const ddx = Math.abs(1 / (rdx || 1e-9)), ddy = Math.abs(1 / (rdy || 1e-9));
+        let stepX, stepY, sideX, sideY;
+        if (rdx < 0) { stepX = -1; sideX = (px / TS - mapX) * ddx; } else { stepX = 1; sideX = (mapX + 1 - px / TS) * ddx; }
+        if (rdy < 0) { stepY = -1; sideY = (py / TS - mapY) * ddy; } else { stepY = 1; sideY = (mapY + 1 - py / TS) * ddy; }
+        let side = 0, hit = 0, guard = 0, tv = 1;
+        while (!hit && guard++ < 96) {
+          if (sideX < sideY) { sideX += ddx; mapX += stepX; side = 0; } else { sideY += ddy; mapY += stepY; side = 1; }
+          if (mapX < 0 || mapY < 0 || mapX >= LW || mapY >= LH) { hit = 1; tv = 1; break; }
+          tv = grid[mapY * LW + mapX]; hit = (tv === 1 || tv === 6) ? 1 : 0;
+        }
+        const perpTiles = Math.max(0.02, side === 0 ? (sideX - ddx) : (sideY - ddy));
+        const dWorld = perpTiles * TS;
+        this.zbuf[c] = dWorld;
+
+        const wallH = Math.min(H * 4, (H * 2.4) / perpTiles);
+        let wx = side === 0 ? (py / TS + perpTiles * rdy) : (px / TS + perpTiles * rdx);
+        wx -= Math.floor(wx);
+        const stripe = ((wx * 6) | 0) % 2;
+
+        // distance fog + side shading + a brick-ish stripe
+        let lit = clamp(1 - dWorld / MAXD, 0, 1); lit = 0.16 + 0.84 * Math.pow(lit, 1.35);
+        if (side === 1) lit *= 0.80;
+        if (stripe) lit *= 0.90;
+        const base = tv === 6 ? [128, 108, 92] : [104, 110, 132];
+        ctx.fillStyle = 'rgb(' + ((base[0] * lit) | 0) + ',' + ((base[1] * lit) | 0) + ',' + ((base[2] * lit) | 0) + ')';
+        ctx.fillRect(c * colW, horizon - wallH / 2, colW + 1, wallH);
+      }
+
+      // ---- billboards: actors, loot, props ----
+      const sprites = [];
+      for (const e of ents.en) sprites.push({ x: e.x, y: e.y, k: 'en', t: e.t, b: e.b, f: e.f });
+      for (const sv of ents.surv) if (sv.id !== this.youId && !sv.dd) sprites.push({ x: sv.x, y: sv.y, k: 'ally', t: sv.hero });
+      for (const it of ents.it) sprites.push({ x: it.x, y: it.y, k: 'item', t: it.k });
+      if (this.breakByN) for (const b of this.breakByN) if (!b.dead) sprites.push({ x: b.x, y: b.y, k: 'prop', t: b.t });
+      for (const sp of sprites) {
+        const ddx2 = sp.x - px, ddy2 = sp.y - py;
+        const depth = ddx2 * fx + ddy2 * fy;
+        if (depth < 0.35) continue;
+        const lateral = ddx2 * rx + ddy2 * ry;
+        sp.depth = depth; sp.sx = W / 2 * (1 + (lateral / depth) / plane);
+      }
+      sprites.sort((a, b) => (b.depth || 0) - (a.depth || 0));
+      for (const sp of sprites) {
+        if (!sp.depth) continue;
+        const col = Math.floor(sp.sx / colW);
+        if (col >= 0 && col < cols && this.zbuf[col] < sp.depth - 6) continue;   // hidden behind a wall
+        const worldH = sp.k === 'en' ? (sp.b ? 96 : 54) : sp.k === 'ally' ? 54 : sp.k === 'item' ? 20 : 34;
+        const hh = (H * worldH) / sp.depth;
+        const ww = hh * 0.52;
+        if (sp.sx + ww < 0 || sp.sx - ww > W) continue;
+        const fog = clamp(1 - sp.depth / MAXD, 0, 1);
+        ctx.globalAlpha = 0.25 + 0.75 * fog;
+        const eye = 1.2 * TS;
+        const yBot = horizon + (H * eye) / sp.depth;
+        const top = yBot - hh;
+        if (sp.k === 'en') {
+          const c = sp.b ? '#ff2d55' : sp.t === 'tiyanak' ? '#e0263f' : sp.t === 'batibat' ? '#8b5cf6'
+            : sp.t === 'mangkukulam' ? '#3ddc84' : sp.t === 'pugot' ? '#9aa0ab' : sp.t === 'spitter' ? '#2dd4bf' : '#b7c05a';
+          ctx.fillStyle = c;
+          ctx.beginPath(); ctx.ellipse(sp.sx, top + hh * 0.62, ww * 0.5, hh * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(sp.sx, top + hh * 0.16, ww * 0.34, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#fff2'; ctx.beginPath(); ctx.arc(sp.sx - ww * 0.12, top + hh * 0.14, ww * 0.07, 0, Math.PI * 2); ctx.arc(sp.sx + ww * 0.12, top + hh * 0.14, ww * 0.07, 0, Math.PI * 2); ctx.fill();
+          if (sp.f) { ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.ellipse(sp.sx, top + hh * 0.5, ww * 0.5, hh * 0.5, 0, 0, Math.PI * 2); ctx.fill(); }
+        } else if (sp.k === 'ally') {
+          ctx.fillStyle = '#5ad1ff';
+          ctx.beginPath(); ctx.ellipse(sp.sx, top + hh * 0.62, ww * 0.45, hh * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(sp.sx, top + hh * 0.16, ww * 0.3, 0, Math.PI * 2); ctx.fill();
+        } else if (sp.k === 'item') {
+          ctx.fillStyle = '#ffb02e';
+          ctx.fillRect(sp.sx - ww * 0.5, top, ww, hh);
+        } else {
+          ctx.fillStyle = '#7a6a52';
+          ctx.fillRect(sp.sx - ww * 0.5, top, ww, hh);
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // ---- tracers as screen-space streaks toward their world point ----
+      if (ents.tr) for (const t of ents.tr) {
+        const depth = (t.x - px) * fx + (t.y - py) * fy;
+        if (depth < 0.4) continue;
+        const lateral = (t.x - px) * rx + (t.y - py) * ry;
+        const sx = W / 2 * (1 + (lateral / depth) / plane);
+        ctx.strokeStyle = 'rgba(255,214,120,' + (0.5 * t.l).toFixed(2) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(sx, horizon - H * 0.06); ctx.lineTo(sx + 6, horizon - H * 0.05); ctx.stroke();
+      }
+
+      // ---- weapon viewmodel ----
+      const sway = Math.sin(this.fpBob * 0.5) * (this.fpMoving ? 8 : 2);
+      const gx = W / 2 + sway, gy = H - H * 0.06 + Math.abs(Math.cos(this.fpBob)) * (this.fpMoving ? 5 : 2);
+      ctx.fillStyle = '#171a22';
+      ctx.fillRect(gx - W * 0.035, gy - H * 0.14, W * 0.07, H * 0.22);
+      ctx.fillStyle = '#262a35';
+      ctx.fillRect(gx - W * 0.018, gy - H * 0.34, W * 0.036, H * 0.22);
+      ctx.fillStyle = '#0d0f14';
+      ctx.fillRect(gx - W * 0.008, gy - H * 0.36, W * 0.016, H * 0.05);
+      if (this.fpMuzzle > 0) {
+        this.fpMuzzle -= dt;
+        ctx.fillStyle = 'rgba(255,196,90,' + (this.fpMuzzle * 8).toFixed(2) + ')';
+        ctx.beginPath(); ctx.arc(gx, gy - H * 0.31, W * 0.03, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // vignette for the horror mood
+      g = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.85);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.55)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+
     drawMinimap(canvas, snap) {
       const L = this.level; if (!L) return;
       const ctx = canvas.getContext('2d');
