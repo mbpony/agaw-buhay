@@ -5,6 +5,7 @@
  *   node test/mobile.js
  */
 'use strict';
+const fs = require('fs'), path = require('path');
 const { bootClient, T } = require('./env');
 const ok = T.ok, sleep = T.sleep;
 
@@ -247,6 +248,25 @@ const PORTRAIT = { width: 390, height: 844 };
   await sleep(80);
   ok(f.dbg().input.fire === false && f.dbg().input.my === 0, 'releases are handled (no stuck buttons)');
   ok(f.errors.length === 0, 'no errors on the fallback path', f.errors.slice(0, 2).join(' | '));
+
+  /* ---- HUD footprint: the squad list must not eat the screen ---- */
+  console.log('\n== HUD footprint on a 390px-tall screen ==');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'index.html'), 'utf8');
+  const mq = css.slice(css.indexOf('@media (max-height:560px){'));
+  const squadRows = f.doc.querySelectorAll('#squad .mate').length;
+  ok(squadRows === 4, 'squad list renders 4 survivor rows', squadRows);
+  ok(!/width:min\(330px,44vw\)/.test(css), 'the old 330px-wide squad block is gone');
+  ok(/\.hud-bl\{[^}]*width:min\(236px/.test(css), 'desktop squad list capped at 236px wide');
+  ok(/\.hud-bl\{[^}]*width:min\(178px/.test(mq), 'phone squad list capped at 178px wide');
+  ok(/\.mate \.pv\{display:none\}/.test(mq), 'portraits dropped on a short screen');
+  ok(/\.mate \.rl\{display:none\}/.test(mq), 'role label dropped on a short screen');
+  ok(/\.bars2 \.bar\.st\{display:none\}/.test(mq), 'stamina bar dropped on a short screen (health only)');
+  ok(/\.mate\{grid-template-columns:1fr auto/.test(mq), 'each survivor is a single compact line');
+  // 4 rows at ~19px + 3 gaps at 3px = ~85px of a 390px screen (was ~245px)
+  const rowsPx = 4 * 19 + 3 * 3;
+  ok(rowsPx < 110, 'squad list costs ~' + rowsPx + 'px of vertical space (<110)');
+  ok(/\.hud-bl\{[^}]*bottom:calc\(150px/.test(mq), 'squad list still clears the thumb pads');
+
   f.close();
 
   process.exit(T.report() ? 1 : 0);

@@ -158,24 +158,24 @@ label.f{display:block;font:700 10px/1 var(--mono);letter-spacing:.2em;color:var(
 #bossbar.body .bn{color:#c58cff}
 #bossbar.body .bt i{background:linear-gradient(180deg,#c58cff,#4b1d70)}
 
-.hud-bl{position:absolute;left:12px;bottom:12px;display:grid;gap:7px;width:min(330px,44vw)}
-.mate{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;padding:7px 9px;background:rgba(8,10,15,.74);border:1px solid var(--line);border-left:3px solid var(--hc)}
+.hud-bl{position:absolute;left:12px;bottom:12px;display:grid;gap:4px;width:min(236px,30vw)}
+.mate{display:grid;grid-template-columns:24px 1fr auto;gap:7px;align-items:center;padding:4px 7px;background:rgba(8,10,15,.7);border:1px solid var(--line);border-left:3px solid var(--hc)}
 .mate.dead{opacity:.42;filter:grayscale(1)}
 .mate.down{border-left-color:var(--red);animation:pulse 1.1s infinite}
 @keyframes pulse{50%{background:rgba(96,16,28,.55)}}
-.mate .pv{width:34px;height:34px;position:relative}
-.mate .pv canvas{width:34px;height:34px;display:block}
-.mate .nm{font:700 11px/1.25 var(--font);letter-spacing:.02em}
-.mate .rl{font:600 8.5px/1.3 var(--mono);letter-spacing:.13em;color:var(--dim);text-transform:uppercase}
-.bars2{display:grid;gap:3px;margin-top:4px}
-.bar{height:5px;background:#1a1e26;overflow:hidden}
+.mate .pv{width:24px;height:24px;position:relative}
+.mate .pv canvas{width:24px;height:24px;display:block}
+.mate .nm{font:700 10.5px/1.2 var(--font);letter-spacing:.02em;display:inline}
+.mate .rl{font:600 8px/1.2 var(--mono);letter-spacing:.1em;color:var(--dim);text-transform:uppercase;display:inline;margin-left:6px;opacity:.8}
+.bars2{display:grid;gap:2px;margin-top:3px}
+.bar{height:3px;background:#1a1e26;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--green);width:100%}
 .bar.st{height:3px}.bar.st i{background:var(--cyan)}
-.mate .stt{font:700 8.5px/1.3 var(--mono);letter-spacing:.08em;text-align:right;color:var(--dim);white-space:nowrap}
+.mate .stt{font:700 8px/1.2 var(--mono);letter-spacing:.06em;text-align:right;color:var(--dim);white-space:nowrap}
 .mate .stt b{color:var(--red)}
-.abring{position:relative;width:26px;height:26px}
+.abring{position:relative;width:20px;height:20px}
 .abring svg{position:absolute;inset:0;transform:rotate(-90deg)}
-.abring span{position:absolute;inset:0;display:grid;place-items:center;font:800 9px/1 var(--mono);color:#fff}
+.abring span{position:absolute;inset:0;display:grid;place-items:center;font:800 7.5px/1 var(--mono);color:#fff}
 
 .hud-br{position:absolute;right:14px;bottom:14px;text-align:right}
 #ammo{font:900 44px/1 var(--mono);color:#fff;text-shadow:0 3px 16px #000}
@@ -291,8 +291,20 @@ body.touch.portrait #rotate{display:flex}
   #objlabel{font-size:11px}
   #minimap{width:104px;height:104px}
   /* lift the squad list and ammo readout clear of the thumb pads */
-  .hud-bl{transform:scale(.8);transform-origin:bottom left;
-    left:calc(8px + env(safe-area-inset-left));bottom:calc(156px + env(safe-area-inset-bottom));width:min(240px,42vw)}
+  .hud-bl{left:calc(8px + env(safe-area-inset-left));bottom:calc(150px + env(safe-area-inset-bottom));
+    width:min(178px,34vw);gap:3px}
+  /* a landscape phone is ~390px tall: no portraits, one line per survivor,
+     health bar only. 4 rows now cost ~76px instead of ~245px. */
+  .mate{grid-template-columns:1fr auto;gap:6px;padding:2px 6px}
+  .mate .pv{display:none}
+  .mate .rl{display:none}
+  .mate .nm{font-size:10px}
+  .bars2{margin-top:2px;gap:0}
+  .bars2 .bar.st{display:none}
+  .bar{height:3px}
+  .mate .stt{font-size:7.5px}
+  .abring{width:16px;height:16px}
+  .abring span{font-size:6.5px}
   .hud-br{transform:scale(.82);transform-origin:bottom right;
     right:calc(10px + env(safe-area-inset-right));bottom:calc(142px + env(safe-area-inset-bottom))}
   #ammo{font-size:32px}
@@ -623,6 +635,57 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
     <p>Agaw-Buhay is played in <b style="color:#ffb02e">landscape</b>. Turn your phone sideways, then tap to go full screen.</p>
   </div>
 </div>
+
+<script>
+/* A 404'd module or a thrown exception used to leave the game sitting on the
+   title screen with no clue why. Report it on screen instead. */
+(function () {
+  var CSS = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99999;' +
+    'max-width:min(94vw,660px);background:#2a0d10;border:1px solid #ff5a5f;border-radius:10px;' +
+    'padding:12px 14px;color:#ffd9db;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;' +
+    'box-shadow:0 10px 34px rgba(0,0,0,.65);white-space:pre-wrap;word-break:break-word';
+  function box(title, detail) {
+    var el = document.getElementById('booterr');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'booterr'; el.style.cssText = CSS;
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = '\u26a0 ' + title + '\n\n' + detail + '\n\n(tap to dismiss)';
+    el.onclick = function () { el.parentNode && el.parentNode.removeChild(el); };
+  }
+  // Failed script / link loads arrive here in the CAPTURE phase.
+  window.addEventListener('error', function (e) {
+    var t = e.target || e.srcElement;
+    if (t && t.tagName && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+      box('Hindi na-load ang isang file ng laro / Failed to load a game file',
+        (t.src || t.href) +
+        '\n\nPage URL: ' + location.href +
+        '\n\nRelative paths only resolve when the page is inside /client/.' +
+        '\nTry: ' + location.origin + '/client/index.html');
+    }
+  }, true);
+  window.onerror = function (msg, src, line, col, err) {
+    box('Hindi nakapag-start ang laro / The game failed to start',
+      msg + '\n' + (src || '') + ':' + (line || 0) + ':' + (col || 0) +
+      (err && err.stack ? '\n\n' + err.stack : ''));
+  };
+  window.addEventListener('unhandledrejection', function (e) {
+    box('Unhandled error', String((e.reason && e.reason.stack) || e.reason));
+  });
+  // Belt and braces: after load, confirm the modules actually arrived.
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      if (typeof window.DATA === 'undefined' || typeof window.ABAW_DEBUG === 'undefined') {
+        box('Hindi nag-start ang script ng laro / Game script did not start',
+          'core/data.js loaded: ' + (typeof window.DATA !== 'undefined') +
+          '\nclient/main.js loaded: ' + (typeof window.ABAW_DEBUG !== 'undefined') +
+          '\n\nPage URL: ' + location.href);
+      }
+    }, 1500);
+  });
+})();
+</script>
 
 <script src="../core/data.js"></script>
 <script src="../core/level.js"></script>

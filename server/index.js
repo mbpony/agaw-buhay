@@ -43,7 +43,17 @@ const server = http.createServer((req, res) => {
   const u = (req.url || '/').split('?')[0];
   if (u === '/health') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, rooms: rooms.size, v: DATA.VERSION })); return; }
   if (u === '/api/rooms') { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ rooms: roomList() })); return; }
-  let rel = u === '/' ? '/client/index.html' : u;
+  // index.html uses RELATIVE script paths (../core/*.js, audio.js) so the folder
+  // also works when opened straight off disk via file://. Serving it at "/" makes
+  // a browser resolve "audio.js" to "/audio.js" -> 404, and the game then sits
+  // silently on the title screen because main.js never loads. Redirect instead so
+  // the document URL always lives inside /client/.
+  if (u === '/' || u === '/index.html' || u === '/client' || u === '/client/') {
+    res.writeHead(302, { Location: '/client/index.html', 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+  const rel = u;
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
   serve(res, file);

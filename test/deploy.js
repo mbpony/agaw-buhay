@@ -70,22 +70,59 @@ const get = (port, p) => new Promise(res => {
   ok(/env\(safe-area-inset/.test(html), 'HUD and pads respect safe-area insets');
   ok(!/https?:\/\/(?!127|localhost)[\w.-]+\//.test(html.replace(/www\.w3\.org[^"']*/g, '')), 'index.html loads no third-party origin (works offline)');
 
-  console.log('\n== Boots on an injected port ==');
   const PORT = 3987;
-  const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
+  const child0 = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: Object.assign({}, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'pipe']
   });
-  let out = '';
-  child.stdout.on('data', d => out += d);
-  child.stderr.on('data', d => out += d);
-  let ready = false;
-  for (let i = 0; i < 40; i++) { if (await get(PORT, '/health')) { ready = true; break; } await sleep(150); }
-  ok(ready, 'server listens on PORT=' + PORT, ready ? '' : out.slice(0, 200));
+  let bootLog = '';
+  child0.stdout.on('data', d => bootLog += d);
+  child0.stderr.on('data', d => bootLog += d);
+  for (let i = 0; i < 40; i++) { if (await get(PORT, '/health')) break; await sleep(150); }
+
+  console.log('\n== Subresources resolve like a browser ==');
+  // Regression test for the bug that shipped the game unplayable: index.html was
+  // served at "/" while its script tags are relative ("audio.js"), so the browser
+  // requested "/audio.js" -> 404 -> main.js never ran -> stuck on the title screen.
+  // jsdom injects modules by hand, so ONLY this check catches that class of bug.
+  const raw = await new Promise(res => {
+    const req = http.get({ host: '127.0.0.1', port: PORT, path: '/', timeout: 3000 }, r => {
+      let b = ''; r.on('data', d => b += d); r.on('end', () => res({ status: r.statusCode, body: b, headers: r.headers }));
+    });
+    req.on('error', () => res(null)); req.on('timeout', () => { req.destroy(); res(null); });
+  });
+  ok(!!raw, 'GET / answered');
+  if (raw) {
+    const redirected = raw.status === 302 || raw.status === 301;
+    const finalPath = redirected ? (raw.headers.location || '/client/index.html') : '/';
+    ok(redirected, 'GET / redirects into /client/ so relative paths resolve', 'status=' + raw.status + ' loc=' + raw.headers.location);
+    const page = redirected ? await get(PORT, finalPath) : raw;
+    ok(page && page.status === 200 && /AGAW-BUHAY/i.test(page.body), 'final document serves the game HTML');
+    const srcs = [...(page ? page.body : '').matchAll(/<script[^>]+src=["']([^"']+)["']/g)].map(m => m[1]);
+    ok(srcs.length >= 6, 'found the 6 game modules in the document: ' + srcs.join(', '));
+    for (const src of srcs) {
+      // resolve exactly like a browser would, against the FINAL document URL
+      const resolved = new URL(src, 'http://127.0.0.1:' + PORT + finalPath).pathname;
+      const r = await get(PORT, resolved);
+      ok(r && r.status === 200 && r.body.length > 500, src + ' -> ' + resolved + ' = 200',
+        r ? 'http ' + r.status + ', ' + r.body.length + 'b' : 'no response');
+    }
+    const mj = await get(PORT, new URL('main.js', 'http://x' + finalPath).pathname);
+    ok(mj && /ABAW_DEBUG/.test(mj.body), 'main.js really is the game shell (contains ABAW_DEBUG)');
+    ok(/booterr/.test(page ? page.body : ''), 'boot-failure overlay is present so a 404 is never silent again');
+  }
+
+  console.log('\n== Boots on an injected port ==');
+  const child = child0;
+  const out = () => bootLog;
+  const ready = !!(await get(PORT, '/health'));
+  ok(ready, 'server listens on PORT=' + PORT, ready ? '' : out().slice(0, 200));
   if (ready) {
     const h = await get(PORT, '/health');
     ok(h.status === 200 && /"ok":true/.test(h.body), '/health returns 200 + JSON: ' + h.body);
-    const idx = await get(PORT, '/');
-    ok(idx.status === 200 && /AGAW-BUHAY/i.test(idx.body), 'GET / serves the game');
+    const red = await get(PORT, '/');
+    ok(red.status === 302 && red.headers.location === '/client/index.html', 'GET / redirects to /client/index.html', red.status + ' -> ' + red.headers.location);
+    const idx = await get(PORT, '/client/index.html');
+    ok(idx.status === 200 && /AGAW-BUHAY/i.test(idx.body), 'the document it redirects to serves the game');
     ok(/no-cache/.test(JSON.stringify(idx.headers)), 'index.html sent with no-cache');
     const js = await get(PORT, '/client/main.js');
     ok(js.status === 200 && /text\/javascript/.test(js.headers['content-type'] || ''), 'JS served with a valid content-type');
@@ -97,7 +134,7 @@ const get = (port, p) => new Promise(res => {
     child.on('exit', code => { clearTimeout(t); res(code === 0); });
   });
   ok(exited, 'exits cleanly (code 0) on SIGTERM');
-  ok(/SIGTERM/.test(out), 'logs the shutdown');
+  ok(/SIGTERM/.test(out()), 'logs the shutdown');
 
   console.log('\n----------------------------------------');
   console.log('  PASS ' + pass + '   FAIL ' + fail);
