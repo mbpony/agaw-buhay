@@ -126,6 +126,24 @@ const get = (port, p) => new Promise(res => {
     ok(/no-cache/.test(JSON.stringify(idx.headers)), 'index.html sent with no-cache');
     const js = await get(PORT, '/client/main.js');
     ok(js.status === 200 && /text\/javascript/.test(js.headers['content-type'] || ''), 'JS served with a valid content-type');
+    const sim = await get(PORT, '/core/sim.js');
+    ok(sim.status === 200 && sim.body.length > 1000, 'core/sim.js served too (index.html loads ../core/*.js)');
+
+    // ROOT is the repo top level, so a naive static handler here serves the whole
+    // project. These files all really exist -- if any comes back 200 the
+    // whitelist has regressed.
+    console.log('\n== Repo internals are not public ==');
+    for (const p of ['/package.json', '/package-lock.json', '/render.yaml', '/README.md',
+                     '/server/index.js', '/test/loot.js', '/.git/config', '/.gitignore', '/.env']) {
+      const r = await get(PORT, p);
+      ok(r.status === 404 || r.status === 403, p + ' is not served', r.status);
+    }
+    for (const p of ['/client/../package.json', '/core/../server/index.js', '/client/.hidden.js']) {
+      const r = await get(PORT, p);
+      ok(r.status === 404 || r.status === 403, p + ' is refused', r.status);
+    }
+    const up = await get(PORT, '/uploads/AGAW_BUHAY_SURVIVAL_DOCUMENTATION.pdf');
+    ok(up.status === 404 || up.status === 403, 'the design doc is not downloadable from the game server', up.status);
   }
   // graceful shutdown
   child.kill('SIGTERM');

@@ -54,6 +54,13 @@ const server = http.createServer((req, res) => {
     return;
   }
   const rel = u;
+  // Only the two folders the browser actually loads are public. ROOT is the repo
+  // top level, so without this a static handler here serves EVERYTHING in it --
+  // server source, tests, the .git directory, and any .env added later. Verified
+  // before the fix: GET /.env returned 200 with the file contents.
+  const seg = rel.split('/');
+  if (seg[1] !== 'client' && seg[1] !== 'core') { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
+  if (seg.some(x => x.startsWith('.'))) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
   const file = path.join(ROOT, rel);
   if (!file.startsWith(ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
   serve(res, file);
