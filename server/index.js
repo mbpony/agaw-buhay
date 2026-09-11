@@ -184,6 +184,7 @@ class Room {
         sim.addSurvivor({ id: 'bot_' + h, name: DATA.SURVIVORS[h].name, hero: h, isBot: true });
       }
     }
+    if (this.carry) { sim.importCarry(this.carry); this.carry = null; }
     this.sim = sim;
     this.state = 'playing';
     this.startedAt = Date.now();
@@ -361,6 +362,9 @@ function handle(c, m) {
 
     case 'restart':
       if (!c.room || c.room.hostConn !== c) break;
+      // advancing after a VICTORY keeps everything the squad is carrying;
+      // a defeat wipes the loadout so the retry starts clean
+      c.room.carry = (c.room.sim && c.room.sim.phase === 'victory') ? c.room.sim.exportCarry() : null;
       c.room.state = 'lobby'; c.room.sim = null;
       c.room.cfg.stage = DATA.stageById(m.stage) ? m.stage : c.room.cfg.stage;
       c.room.broadcastLobby();

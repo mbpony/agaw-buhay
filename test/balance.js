@@ -18,7 +18,26 @@ const D = require('../core/data.js');
 const LV = require('../core/level.js');
 const { Sim } = require('../core/sim.js');
 
-function makeController(sim, lvl) {
+/* The proxy player deliberately jitters its aim and breaks navigation ties at
+   random so it behaves like a human rather than an aimbot. That randomness has
+   to be SEEDED, otherwise the same stage+seed produces a different run every
+   time and the pass/fail contract turns into a coin flip. mulberry32 gives us
+   the same jittery-but-reproducible player on every machine. */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+function makeController(sim, lvl, rnd) {
   const state = new Map();
   return function inputs() {
     const out = {};
@@ -108,7 +127,7 @@ function makeController(sim, lvl) {
       if (LV.isSolid(lvl, s.x + ux * 44, s.y + uy * 44)) {
         const l = LV.isSolid(lvl, s.x - uy * 44, s.y + ux * 44) ? -1 : 1;
         const r2 = LV.isSolid(lvl, s.x + uy * 44, s.y - ux * 44) ? -1 : 1;
-        const pick = (l === -1 && r2 === -1) ? (Math.random() < 0.5 ? 1 : -1) : (l !== -1 ? 1 : -1);
+        const pick = (l === -1 && r2 === -1) ? (rnd() < 0.5 ? 1 : -1) : (l !== -1 ? 1 : -1);
         dx = -uy * pick * dl0; dy = ux * pick * dl0;
       }
       const dl = Math.hypot(dx, dy) || 1;
@@ -118,7 +137,7 @@ function makeController(sim, lvl) {
 
       // --- shooting ---
       if (tgt && td < 540 * 540 && LV.lineOfSight(lvl, s.x, s.y, tgt.x, tgt.y)) {
-        const a = Math.atan2(tgt.y - s.y, tgt.x - s.x) + (Math.random() - .5) * 0.035;
+        const a = Math.atan2(tgt.y - s.y, tgt.x - s.x) + (rnd() - .5) * 0.035;
         inp.aimx = Math.cos(a); inp.aimy = Math.sin(a);
         inp.fire = s.mag > 0 && !(wantInteract && d < 60);
         if (s.abCd <= 0) {
@@ -145,7 +164,8 @@ function run(stage, diff, seed, opts) {
   const sim = new Sim({ stage, level: lvl, difficulty: diff, seed });
   const nHuman = opts.humans === undefined ? 4 : opts.humans;
   D.SURVIVOR_ORDER.forEach((h, i) => sim.addSurvivor({ id: 'p' + i, name: (i < nHuman ? 'P' : 'BOT') + '-' + h, hero: h, isBot: i >= nHuman }));
-  const ctrl = makeController(sim, lvl);
+  const hrnd = mulberry32(hashSeed(stage.id + '|' + diff + '|' + seed));
+  const ctrl = makeController(sim, lvl, hrnd);
   const causes = {};
   const orig = sim.damageSurvivor.bind(sim);
   sim.damageSurvivor = function (s, d, src, k) { causes[k || '?'] = (causes[k || '?'] || 0) + d; return orig(s, d, src, k); };

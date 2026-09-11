@@ -82,6 +82,101 @@ const ok = T.ok, sleep = T.sleep;
   c.key('f'); await sleep(200);
   ok(errors.length === 0, 'WASD / aim / fire / ability / reload / melee handled', errors.slice(0, 3).join(' | '));
 
+  T.section('Containers, loot and the loadout HUD');
+  {
+    const dbg = win.ABAW_DEBUG, sim = dbg.app.sim, rend = dbg.renderer;
+    const me = () => sim.survivors.find(v => v.id === dbg.app.you);
+    ok(sim.breaks.length > 0, 'the local sim seeded ' + sim.breaks.length + ' loot containers');
+    ok(rend.breakByN && rend.breakByN.length === sim.breaks.length, 'the renderer indexed the same containers');
+
+    // --- smash one open with the melee key ---
+    const box = sim.breaks.find(b => !b.dead);
+    const floorBefore = sim.items.length, iidBefore = sim._iid || 0;
+    // Do NOT teleport the survivor: the camera lerps toward it, so a teleport
+    // leaves the mouse-derived aim pointing the wrong way. Move the container in
+    // front of the survivor instead, then aim the cursor at its true projected
+    // screen position -- exactly the inverse of the client's aim maths.
+    for (let i = 0; i < 16 && !box.dead; i++) {
+      const sv = me();
+      // 52px: inside the melee arc (58 + prop radius) but outside the 30px
+      // auto-pickup radius, so a consumable drop still lands on the floor
+      // instead of being instantly collected.
+      box.x = sv.x + Math.cos(sv.aim) * 52; box.y = sv.y + Math.sin(sv.aim) * 52;
+      const z = rend.cam.zoom * (rend.w < 700 ? 0.82 : 1);
+      canvas.dispatchEvent(new win.MouseEvent('mousemove', {
+        bubbles: true,
+        clientX: rend.w / 2 + (box.x - rend.cam.x) * z,
+        clientY: rend.h / 2 + (box.y - rend.cam.y) * z
+      }));
+      c.key('f'); await sleep(70); c.key('f', 'keyup'); await sleep(40);
+    }
+    ok(box.dead, 'melee (F) smashed the container open');
+    // _iid is monotonic, so it proves a drop was created even if a survivor
+    // auto-collected it; items.length proves this one stayed on the floor
+    ok((sim._iid || 0) > iidBefore, 'it rolled a drop (item counter ' + iidBefore + ' -> ' + (sim._iid || 0) + ')');
+    ok(sim.items.length > floorBefore, 'and that drop is lying on the floor');
+    await sleep(260);
+    const rb = rend.breakByN[box.n];
+    ok(rb && rb.dead, 'the renderer was told the container is destroyed (snapshot bk delta)');
+
+    // --- pick up a rifle with E ---
+    const s1 = me();
+    const gun = sim.spawnItem(s1.x + 8, s1.y, 'w:rifle');
+    await sleep(220);
+    ok(!gun.taken, 'walking over a rifle does not auto-equip it');
+    c.key('e'); await sleep(200); c.key('e', 'keyup'); await sleep(260);
+    ok(gun.taken && s1.alt && s1.alt.id === 'rifle', 'E picks the rifle up into slot 2');
+    ok(!$('gslot2').classList.contains('empty'), 'the gear strip lights up slot 2');
+    ok($('gslot2n').textContent.length > 1, 'slot 2 shows the weapon name: "' + $('gslot2n').textContent + '"');
+    const wnameBefore = c.text('wname'), ammoBefore = c.text('ammo');
+
+    // --- Q swaps, and the HUD must follow the ACTIVE gun ---
+    c.key('q'); await sleep(320); c.key('q', 'keyup'); await sleep(260);
+    ok(s1.wpn === 'rifle', 'Q swapped to the rifle');
+    ok(c.text('wname') !== wnameBefore, 'the weapon readout changed: "' + wnameBefore + '" -> "' + c.text('wname') + '"');
+    ok(c.text('wname').indexOf('Assault Rifle') === 0, 'it names the gun actually in hand');
+    ok(/\d+\/\d+/.test($('gslot2a').textContent), 'slot 2 chip tracks that gun\'s own ammo: ' + $('gslot2a').textContent);
+    ok($('gslot2n').textContent !== 'EMPTY', 'slot 2 now names the gun you swapped away from: ' + $('gslot2n').textContent);
+    c.key('q'); await sleep(340); c.key('q', 'keyup'); await sleep(240);
+    ok(s1.wpn !== 'rifle', 'Q swaps back to the hero weapon');
+
+    // --- G throws ---
+    const mol = sim.spawnItem(s1.x + 6, s1.y, 't:molotov');
+    await sleep(200);
+    c.key('e'); await sleep(200); c.key('e', 'keyup'); await sleep(240);
+    ok(mol.taken && s1.thrKind === 'molotov' && s1.thrN === 1, 'E picks the molotov up');
+    ok($('gthrown').textContent === 'x1', 'the throwable chip counts it: ' + $('gthrown').textContent);
+    ok(!$('gthrow').classList.contains('empty'), 'the throwable chip is lit');
+    const thrownNow = () => sim.proj.filter(q => q.thrown).length;
+    const thrownBefore = thrownNow();
+    c.key('g'); await sleep(180); c.key('g', 'keyup');
+    ok(thrownNow() > thrownBefore, 'G threw it (' + thrownBefore + ' -> ' + thrownNow() + ' thrown projectiles in the air)');
+    await sleep(120);
+    ok(s1.thrN === 0, 'the stack emptied');
+    await sleep(240);
+    ok($('gthrow').classList.contains('empty'), 'the chip dims again when you are out');
+
+    // --- armour ---
+    const vest = sim.spawnItem(s1.x + 6, s1.y, 'armor');
+    await sleep(200);
+    c.key('e'); await sleep(200); c.key('e', 'keyup'); await sleep(260);
+    ok(s1.armor > 0, 'E equips the kevlar vest (' + Math.round(s1.armor) + ')');
+    ok(!$('garmor').classList.contains('empty') && +$('garmorn').textContent > 0, 'the vest chip shows ' + $('garmorn').textContent);
+    const hp0 = s1.hp, ar0 = s1.armor;
+    s1.iframe = 0; sim.damageSurvivor(s1, 30, null, 'hit');
+    const eff = 30 * win.ABAW_DATA.DIFFICULTIES[dbg.app.diffId || 'normal'].dmgMul * (s1.hero === 'berto' ? 0.88 : 1);
+    ok(s1.armor < ar0, 'the vest took damage instead of you (' + ar0 + ' -> ' + Math.round(s1.armor) + ')');
+    ok(Math.abs((hp0 - s1.hp) - eff * 0.55) < 2, 'and soaked 45% of the hit (hp -' + (hp0 - s1.hp).toFixed(1) + ' of ' + eff.toFixed(1) + ' effective)');
+
+    // --- how-to documents the new keys ---
+    dbg.show('how');
+    const how = $('howKeys').textContent;
+    ok(/Q/.test(how) && /Swap weapon/i.test(how), 'How-to-Play documents Q = swap');
+    ok(/G/.test(how) && /Throw/i.test(how), 'How-to-Play documents G = throw');
+    dbg.show('game');
+    ok(errors.length === 0, 'no errors across the whole loot flow', errors.slice(0, 3).join(' | '));
+  }
+
   T.section('Pause / scoreboard / mute / settings');
   c.key('Escape'); await sleep(120);
   ok(c.visible('sc-pause'), 'Esc opens the pause menu');

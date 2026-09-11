@@ -32,7 +32,7 @@
       id: stage.id, biome: stage.biome, seed: stage.seed,
       w: stage.w, h: stage.h, tile: stage.tile,
       grid: new Uint8Array(stage.w * stage.h),
-      props: [], lights: [], spawns: [], nodes: [],
+      props: [], breakables: [], lights: [], spawns: [], nodes: [],
       objectives: [], hazards: []
     };
     L.g = L.grid;
@@ -59,6 +59,7 @@
 
     // 6. Scatter props / cover / lights
     scatterProps(L, rnd, stage);
+
     // 6b. guarantee a walkable lane along the whole spine (clutter can never wall off the route)
     carvePath(L, path, 3);
     pruneLane(L, path, 1);
@@ -94,6 +95,9 @@
     delete L.flowAnchorsTmp;
     // 10. Skyway: seal every edge so nobody walks into the void
     if (stage.biome === 'skyway') { guardRails(L); guardRails(L); }
+    // 10b. Loot containers. Runs LAST so the walkable set is final and a
+    //      breakable can never be placed on a tile the guard rails just sealed.
+    scatterBreakables(L, rnd, stage);
     // 11. director spawn nodes (needs the final walkable set)
     buildSpawnNodes(L, rnd);
     return L;
@@ -354,6 +358,52 @@
     }
   }
 
+
+  function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+  function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+  /* -------- breakable loot props --------
+     Deliberately a SEPARATE layer from scatterProps: these never write to the
+     pathing grid, so blowing one up can never strand an agent or invalidate a
+     cached flow field. Placement is biased toward the spine path so they are
+     actually found, but the target tile must be walkable, which keeps them from
+     visually overlapping the blocking clutter. */
+  const BREAKABLE_MIX = {
+    avenue:  [['trash', 30], ['box', 22], ['crate', 22], ['barrel', 14], ['cabinet', 6], ['vending', 6]],
+    station: [['box', 24], ['vending', 22], ['cabinet', 18], ['crate', 18], ['trash', 12], ['barrel', 6]],
+    skyway:  [['crate', 34], ['barrel', 26], ['box', 22], ['trash', 12], ['cabinet', 6]]
+  };
+  function scatterBreakables(L, rnd, stage) {
+    const mix = BREAKABLE_MIX[stage.biome] || BREAKABLE_MIX.avenue;
+    let tot = 0; for (const m of mix) tot += m[1];
+    const want = stage.biome === 'skyway' ? 24 : 30;
+    const out = [];
+    const minSep = L.tile * 1.5, minSep2 = minSep * minSep;
+    let guard = 0;
+    while (out.length < want && guard++ < want * 60) {
+      // pick a point along the spine, then jitter off it
+      const p = L.path[Math.floor(rnd() * L.path.length)];
+      const ang = rnd() * Math.PI * 2;
+      const rad = (0.9 + rnd() * 2.9) * L.tile;
+      const wx = (p.x + 0.5) * L.tile + Math.cos(ang) * rad;
+      const wy = (p.y + 0.5) * L.tile + Math.sin(ang) * rad;
+      const tx = Math.floor(wx / L.tile), ty = Math.floor(wy / L.tile);
+      if (!inb(L, tx, ty) || !walkable(L.g[idx(L, tx, ty)])) continue;
+      // never drop loot in deadly water/void or right on the spawn/extract pad
+      if (isDeadly(L.g[idx(L, tx, ty)])) continue;
+      if (dist(wx, wy, L.spawn.x, L.spawn.y) < L.tile * 4) continue;
+      if (dist(wx, wy, L.extract.x, L.extract.y) < L.tile * 3) continue;
+      let clash = false;
+      for (const b of out) if (dist2(b.x, b.y, wx, wy) < minSep2) { clash = true; break; }
+      if (clash) continue;
+      let r = rnd() * tot, t = mix[0][0];
+      for (const m of mix) { if (r < m[1]) { t = m[0]; break; } r -= m[1]; }
+      out.push({ id: 'br' + out.length, t, x: Math.round(wx), y: Math.round(wy), rot: rnd() * 0.6 - 0.3, seed: Math.floor(rnd() * 1e6) });
+    }
+    L.breakables = out;
+    return out;
+  }
+
   /* -------- props that are purely decorative + collidable clutter -------- */
   function scatterProps(L, rnd, stage) {
     const g = L.g, count = stage.biome === 'station' ? 70 : 120;
@@ -586,7 +636,7 @@
     for (let i = 0; i < L.grid.length; i++) s += L.grid[i].toString(8);
     return {
       id: L.id, biome: L.biome, seed: L.seed, w: L.w, h: L.h, tile: L.tile, grid: s,
-      props: L.props, lights: L.lights, nodes: L.nodes, objectives: L.objectives,
+      props: L.props, breakables: L.breakables || [], lights: L.lights, nodes: L.nodes, objectives: L.objectives,
       flowAnchors: L.flowAnchors, path: L.path, marks: L.marks,
       spawn: L.spawn, extract: L.extract, startDir: L.startDir
     };

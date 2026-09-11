@@ -63,25 +63,127 @@
     shotgun: {
       name: 'Pump Shotgun', dmg: 17, pellets: 8, spread: 0.30, range: 300, rof: 0.85,
       mag: 6, reserve: 42, reload: 2.3, shellReload: true, knock: 190, pierce: 0,
-      sfx: 'shotgun', tracer: 2.4, shake: 5.5
+      sfx: 'shotgun', tracer: 2.4, shake: 5.5, color: '#ffcc44'
     },
     burst: {
       name: 'Burst Rifle', dmg: 15, pellets: 1, spread: 0.045, range: 560, rof: 0.14,
       burst: 3, burstGap: 0.34, mag: 30, reserve: 180, reload: 1.9, knock: 22,
-      sfx: 'rifle', tracer: 3.4, shake: 2.0, healPerKill: 0
+      sfx: 'rifle', tracer: 3.4, shake: 2.0, color: '#9ad7ff', healPerKill: 0
     },
     smg: {
       name: 'Dual SMGs', dmg: 9, pellets: 1, spread: 0.10, range: 400, rof: 0.072,
       mag: 40, reserve: 240, reload: 1.7, knock: 14, dual: true,
-      sfx: 'smg', tracer: 3.0, shake: 1.5
+      sfx: 'smg', tracer: 3.0, shake: 1.5, color: '#ffd28a'
     },
     rifle: {
       name: 'Assault Rifle', dmg: 22, pellets: 1, spread: 0.055, range: 620, rof: 0.115,
       mag: 35, reserve: 210, reload: 2.1, knock: 34, pierce: 1,
-      sfx: 'rifle', tracer: 4.0, shake: 2.6
+      sfx: 'rifle', tracer: 4.0, shake: 2.6, color: '#7dffb0'
+    },
+    revolver: {
+      name: '.44 Revolver', dmg: 64, pellets: 1, spread: 0.022, range: 700, rof: 0.54,
+      mag: 6, reserve: 42, reload: 2.5, knock: 95, pierce: 2, found: true,
+      sfx: 'rifle', tracer: 5.0, shake: 6.0, color: '#ffb3c8'
+    },
+    lmg: {
+      name: 'M60 LMG', dmg: 21, pellets: 1, spread: 0.115, range: 560, rof: 0.095,
+      mag: 80, reserve: 240, reload: 4.2, knock: 30, pierce: 1, heavy: 0.82, found: true,
+      sfx: 'rifle', tracer: 3.6, shake: 2.2, color: '#c8a6ff'
     },
     molotov: { name: 'Molotov', dmg: 12, aoe: 108, burn: 7, sfx: 'fire' }
   };
+
+  /* ---------- 3b. THROWABLES ----------
+     Carried in a single stack; thrown with G / the THROW button. They arc,
+     bounce once, then detonate. A molotov leaves a lingering fire patch. */
+  const THROWABLES = {
+    molotov: { name: 'Molotov',     dmg: 16,  aoe: 116, burn: 9,  linger: 7.0, fuse: 1.05,
+               max: 3, color: '#ff9a3c', sfx: 'fire', icon: 'molotov' },
+    bomb:    { name: 'Pipe Bomb',   dmg: 175, aoe: 176, burn: 0,  linger: 0,   fuse: 2.5,
+               max: 2, color: '#ff5a5f', sfx: 'boom', icon: 'bomb' }
+  };
+
+  /* ---------- 3c. EQUIPMENT ----------
+     Armour is an absorb pool: it eats ARMOR_ABSORB of every hit until empty. */
+  const EQUIPMENT = {
+    armor: { name: 'Kevlar Vest', color: '#8fb4ff', max: 100, absorb: 0.45, icon: 'armor' }
+  };
+
+  /* ---------- 3d. BREAKABLE PROPS ----------
+     Loot containers scattered by the level generator. Non-blocking on purpose:
+     they never touch the pathing grid, so agents can't get stuck behind a crate.
+     A barrel detonates and can chain into its neighbours. */
+  const BREAKABLES = {
+    crate:   { name: 'Supply Crate',    hp: 34, r: 17, z: 26, table: 'crate',   score: 8,  sfx: 'wood',  color: '#a9762f' },
+    box:     { name: 'Cardboard Box',   hp: 16, r: 14, z: 20, table: 'box',     score: 5,  sfx: 'wood',  color: '#b08b57' },
+    trash:   { name: 'Trash Can',       hp: 24, r: 13, z: 25, table: 'trash',   score: 5,  sfx: 'metal', color: '#7d8794' },
+    barrel:  { name: 'Fuel Barrel',     hp: 20, r: 15, z: 26, table: 'barrel',  score: 12, sfx: 'metal', color: '#c0392b',
+               explode: { dmg: 105, r: 138, burn: 4.5, chain: 0.42 } },
+    cabinet: { name: 'Med Cabinet',     hp: 28, r: 16, z: 32, table: 'cabinet', score: 8,  sfx: 'glass', color: '#dfe9f2' },
+    vending: { name: 'Vending Machine', hp: 46, r: 18, z: 40, table: 'vending', score: 10, sfx: 'metal', color: '#3f7fa6' }
+  };
+
+  /* ---------- 3e. LOOT ----------
+     One roll per breakable, made SERVER-SIDE from the sim RNG so every client
+     sees the same drop. Base tiers are biased per prop type, then renormalised:
+     a crate leans weapon-heavy, a trash can is mostly junk, a barrel is a
+     gamble for something rare. */
+  const LOOT = {
+    tiers: { consumable: 0.55, equipment: 0.25, weapon: 0.15, rare: 0.05 },
+    bias: {
+      crate:   { consumable: 0.55, equipment: 0.80, weapon: 2.40, rare: 1.00 },
+      box:     { consumable: 1.25, equipment: 1.00, weapon: 0.60, rare: 0.80 },
+      trash:   { consumable: 1.40, equipment: 1.10, weapon: 0.35, rare: 0.50 },
+      barrel:  { consumable: 0.50, equipment: 0.60, weapon: 0.50, rare: 4.00 },
+      cabinet: { consumable: 1.10, equipment: 1.90, weapon: 0.20, rare: 0.60 },
+      vending: { consumable: 1.50, equipment: 0.80, weapon: 0.30, rare: 0.40 }
+    },
+    // [itemKind, relativeWeight] — item kinds are the strings used by spawnItem
+    pool: {
+      consumable: [['ammo', 34], ['medkit', 24], ['pills', 22], ['adrenaline', 20]],
+      equipment:  [['armor', 46], ['adrenaline', 28], ['medkit', 26]],
+      weapon:     [['w:shotgun', 24], ['w:smg', 24], ['w:rifle', 22], ['w:burst', 16],
+                   ['w:revolver', 8], ['w:lmg', 6]],
+      rare:       [['t:molotov', 44], ['t:bomb', 34], ['armor', 22]]
+    },
+    /* A container can override the pool for a tier so it feels like what it is:
+       prying open a med cabinet should not hand you rifle ammo. */
+    poolOverride: {
+      cabinet: { consumable: [['medkit', 52], ['adrenaline', 26], ['pills', 16], ['ammo', 6]] },
+      vending: { consumable: [['pills', 40], ['ammo', 30], ['medkit', 18], ['adrenaline', 12]] }
+    }
+  };
+
+  /** Resolve any loot/consumable kind to a display record. */
+  function lootInfo(kind) {
+    if (kind && kind.indexOf('w:') === 0) {
+      const w = WEAPONS[kind.slice(2)];
+      if (w) return { name: w.name, color: w.color || '#ffd27a', radius: 14, slot: 'weapon', icon: 'gun' };
+    }
+    if (kind && kind.indexOf('t:') === 0) {
+      const t = THROWABLES[kind.slice(2)];
+      if (t) return { name: t.name, color: t.color, radius: 13, slot: 'throw', icon: t.icon };
+    }
+    if (EQUIPMENT[kind]) return { name: EQUIPMENT[kind].name, color: EQUIPMENT[kind].color, radius: 13, slot: 'equip', icon: EQUIPMENT[kind].icon };
+    const p = PICKUPS[kind];
+    if (p) return { name: p.name, color: p.color, radius: p.radius, slot: 'use', icon: kind };
+    return { name: String(kind || '?'), color: '#ffffff', radius: 12, slot: 'use', icon: 'box' };
+  }
+
+  /** Roll one drop for a breakable table. rnd() must be the sim's RNG. */
+  function rollLoot(table, rnd) {
+    const bias = LOOT.bias[table] || {};
+    const w = {}; let sum = 0;
+    for (const k in LOOT.tiers) { const v = LOOT.tiers[k] * (bias[k] === undefined ? 1 : bias[k]); w[k] = v; sum += v; }
+    let r = rnd() * sum, tier = 'consumable';
+    for (const k in w) { if (r < w[k]) { tier = k; break; } r -= w[k]; }
+    const over = LOOT.poolOverride[table];
+    const pool = (over && over[tier]) || LOOT.pool[tier] || LOOT.pool.consumable;
+    let tot = 0; for (const e of pool) tot += e[1];
+    let pick = rnd() * tot;
+    for (const e of pool) { if (pick < e[1]) return { kind: e[0], tier }; pick -= e[1]; }
+    return { kind: pool[0][0], tier };
+  }
 
   /* ---------- 4. ENEMY ROSTER ---------- */
   const ENEMIES = {
@@ -207,14 +309,17 @@
     ammo:    { name: 'Ammo Box',    color: '#ffcc44', radius: 13 },
     medkit:  { name: 'Med Kit',     color: '#5cff9d', radius: 13 },
     pills:   { name: 'Pain Pills',  color: '#9ad7ff', radius: 11 },
-    adrenaline:{ name: 'Adrenaline',color: '#ff6ad5', radius: 11 }
+    adrenaline:{ name: 'Adrenaline',color: '#ff6ad5', radius: 11 },
+    armor:     { name: 'Kevlar Vest',color: '#8fb4ff', radius: 13 }
   };
 
   const TILE = { FLOOR: 0, WALL: 1, WATER: 2, RUBBLE: 3, RAIL: 4, ROAD: 5, BLOCK: 6, GAP: 7 };
 
   return {
-    SURVIVORS, SURVIVOR_ORDER, WEAPONS, ENEMIES, COMMON_POOL, SPECIAL_POOL,
+    SURVIVORS, SURVIVOR_ORDER, WEAPONS, THROWABLES, EQUIPMENT, BREAKABLES, LOOT,
+    ENEMIES, COMMON_POOL, SPECIAL_POOL,
     STAGES, ACTS, DIFFICULTIES, PICKUPS, TILE,
+    lootInfo, rollLoot,
     VERSION: '1.0.0-act1',
     stageById: (id) => STAGES.find(s => s.id === id) || null
   };

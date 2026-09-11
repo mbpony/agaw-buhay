@@ -64,7 +64,8 @@ AI instead of ending the run, and the host migrates automatically if the host le
 | `WASD` / arrows | Move | `LMB` | Fire |
 | Mouse | Aim | `Shift` | Sprint (stamina) |
 | `Space` | Ability | `R` | Reload |
-| `E` | Interact / revive / break pin (hold) | `F` | Melee |
+| `E` | Interact / pick up / revive / break pin (hold) | `F` | Melee (also smashes containers) |
+| `Q` | Swap weapon (hero gun ⇄ slot 2) | `G` | Throw molotov / bomb |
 | `T` | Squad chat | `Tab` | Scoreboard (hold) |
 | `Esc` | Pause | `M` | Mute |
 
@@ -82,8 +83,8 @@ pointer and switches to a twin-stick layout — no separate build, no app store.
 │                                                                   │
 │   squad                                                     ammo  │
 │                                                                   │
-│              [USE][RLD][HIT]                                      │
-│   ( move )   [RUN][FIRE][ABILITY]   ( aim )                        │
+│            [USE][RLD][HIT][SWAP]                                  │
+│   ( move ) [RUN][FIRE][ABILITY][THROW]  ( aim )                    │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,9 +93,11 @@ pointer and switches to a twin-stick layout — no separate build, no app store.
   never have to lift a thumb to shoot.
 * **Aim assist** — with no thumb on the aim pad, your survivor tracks the
   nearest threat in front of them. Firing still needs the aim pad or `FIRE`.
-* **FIRE / ABILITY / USE / RLD / HIT / RUN** — thumb cluster. `USE` relabels
-  itself to `REVIVE`, `POWER` or `BREAK` depending on what you're standing next
-  to; `ABILITY` shows a cooldown ring; `RUN` latches.
+* **FIRE / ABILITY / USE / RLD / HIT / RUN / SWAP / THROW** — eight-button thumb
+  cluster in a 4-column grid (46 px targets). `USE` relabels itself to `TAKE`,
+  `REVIVE`, `POWER` or `BREAK` depending on what you're standing next to;
+  `ABILITY` shows a cooldown ring; `RUN` latches; `SWAP` and `THROW` dim when
+  there's nothing to swap to or throw.
 * **II** pauses, **GFX** cycles graphics quality.
 * Both pads are multi-touch, so you can strafe and shoot at the same time.
 * Rotating to portrait **auto-pauses** and shows a rotate prompt — you won't
@@ -135,6 +138,58 @@ so a teammate can still pick you up. A full page refresh works the same way
 (the token is kept in `sessionStorage`).
 
 ---
+
+### Loot & loadout
+
+Every stage seeds **destructible props** at positions derived from the stage
+seed, so all four players in a co-op session see exactly the same loot. Smash
+them with `F`, shoot them, or blow up a barrel next to them.
+
+| Prop | HP | Leans toward |
+|---|---|---|
+| Cardboard box | 16 | cheap consumables |
+| Explosive barrel | 20 | the rare tier — and it detonates, chaining to other barrels |
+| Trash can | 24 | consumables, a bit of equipment |
+| Cabinet | 28 | equipment, with its own medical drop pool |
+| Wooden crate | 34 | **weapons** (2.4× weapon bias) |
+| Vending machine | 46 | consumables, with its own snack/pills drop pool |
+
+**Drop tiers** — every container is guaranteed exactly one drop:
+
+| Tier | Base chance | Pool |
+|---|---|---|
+| Consumable | 55% | ammo, medkit, pills, adrenaline |
+| Equipment | 25% | kevlar vest, adrenaline, medkit |
+| Weapon | 15% | shotgun, SMG, rifle, burst rifle, revolver, LMG |
+| Rare | 5% | molotov, pipe bomb, kevlar vest |
+
+Each prop multiplies those odds with its own bias, so a crate is the place to
+look for a gun and a barrel is the place to find a bomb.
+
+Ammo, medkits, pills and adrenaline are **auto-picked-up** on contact. Weapons,
+armour and throwables drop to the floor and wait for `E` / `USE`, so you never
+lose a gun you were saving for.
+
+**Two weapon slots.** Your hero's signature gun is permanent (Berto's pump
+shotgun, Jun-Jun's SMG, and so on). Slot 2 holds one found weapon. `Q` / `SWAP`
+flips between them instantly — each slot keeps its own magazine and reserve, so
+swapping mid-fight never costs you a reload. Picking up a gun you already carry
+converts to spare ammo instead of wasting the slot, and taking a third gun drops
+whatever was in slot 2 back on the floor.
+
+**Throwables** stack per type: up to **3 molotovs**, up to **2 pipe bombs**.
+`G` / `THROW` lobs them along your aim. A molotov shatters into a fire pool
+(16 impact damage, 116 radius, burning for 7 s); a pipe bomb detonates after a
+2.5 s fuse for 175 damage across 176 units, and will set off barrels — and other
+bombs — for a chain reaction.
+
+**Armour.** The kevlar vest is a 100-point pool that soaks **45% of every hit**
+until it's empty, then your health takes the whole thing. It's a buffer, not a
+second health bar.
+
+**Carry-over.** Clearing a stage exports your whole loadout — slot-2 weapon and
+its ammo, throwables, armour — into the next one. Dying wipes it, so a defeat
+sends you back out with only your hero's starting kit.
 
 ## Deploy it online (render.com)
 
@@ -321,25 +376,27 @@ by the Director's intensity.
 ## Tests
 
 ```bash
-npm test                 # all six suites (starts a server itself if none is running)
+npm test                 # all seven suites (starts a server itself if none is running)
 npm run test:balance     # headless play-throughs
 npm run test:dom         # DOM contract
 npm run test:net         # network protocol
 npm run test:client      # headless browser (desktop)
 npm run test:mobile      # headless browser (landscape phone + touch)
+npm run test:loot        # breakables, loot tables, inventory, carry-over
 npm run test:deploy      # render.com readiness
 ```
 
 | Suite | What it does | Asserts |
 |---|---|---|
-| **balance** | A competent-player proxy (waypoint navigation, hazard avoidance, target priority, revives, abilities) plays all 3 stages × 3 difficulties × 2 seeds headlessly | Normal and Veteran must be winnable everywhere; Nightmare must be brutal but not impossible; no stage may soft-lock; sim cost must stay under 35% of one core (measured: **~1.5%**) |
-| **dom** | Cross-references every `#id` main.js touches against index.html | No dangling element references (this caught a boot-time crash on `#fps`) |
+| **balance** | A competent-player proxy (waypoint navigation, hazard avoidance, target priority, revives, abilities) plays all 3 stages × 3 difficulties × 2 seeds headlessly | Normal and Veteran must be winnable everywhere; Nightmare must be brutal but not impossible; no stage may soft-lock; sim cost must stay under 35% of one core (measured: **1.6%**) — **10 contract checks** |
+| **dom** | Cross-references every `#id` main.js touches against index.html | No dangling element references (this caught a boot-time crash on `#fps`) — all **107** referenced ids exist among the **147** in the document |
 | **net** | Two-to-five real WebSocket clients against the live server | Static serving, path-traversal block, handshake, lobby, duplicate-pick rejection, host authority over config/start, level + snapshot delivery, ~24 Hz rate, authoritative input, chat relay, late join, disconnect→bot takeover, host transfer, **seat-token reconnect reclaim**, room cleanup — **66 checks** |
-| **client** | Boots the actual client in jsdom with a stubbed canvas/WebAudio/WebSocket, then plays it | No errors during boot or play; menus and auth flows; a full offline single-player run with a ticking clock, live HUD and 150k+ draw calls; WASD/aim/fire/ability/reload/melee; pause, scoreboard, mute, quality selector; then a **real networked co-op match** against the live server including lobby, launch and squad HUD — **57 checks** |
-| **mobile** | Boots the same client as an 844×390 landscape phone (DPR 3, 2 GB RAM, 4 cores) and drives it with synthesised touch events | Touch detection; low tier auto-selected with grain/glow off and DPR capped; rotate gate in portrait; twin-stick deadzone, rim clamping and full-tilt sprint; **the survivor physically moves around the map on thumb power**; aim stick + auto-fire; simultaneous multi-touch; every cluster button; ability cooldown ring; aim assist locking the nearest threat; GFX cycling; pause; auto-pause on rotate; then a **second boot with PointerEvent removed** to exercise the TouchEvent fallback — **77 checks** |
-| **deploy** | Static + live checks of the render.com contract | Blueprint fields, package scripts, `PORT`/`0.0.0.0`/SIGTERM/exception guards, no-cache static serving, no hard-coded host in the client, `wss://` upgrade on HTTPS, mobile viewport metas and safe-area insets, no third-party origins; then **spawns the server on an injected port**, hits `/health`, and asserts a clean exit 0 on SIGTERM — **38 checks** |
+| **client** | Boots the actual client in jsdom with a stubbed canvas/WebAudio/WebSocket, then plays it | No errors during boot or play; menus and auth flows; a full offline single-player run with a ticking clock, live HUD and 150k+ draw calls; WASD/aim/fire/ability/reload/melee; **smashing a container with `F` and watching the drop hit the floor and the renderer**; `E` pickups into slot 2, `Q` swaps and the HUD following the *active* gun, `G` throws, the gear-strip chips, kevlar soak maths; pause, scoreboard, mute, quality selector; then a **real networked co-op match** against the live server including lobby, launch and squad HUD — **86 checks** |
+| **mobile** | Boots the same client as an 844×390 landscape phone (DPR 3, 2 GB RAM, 4 cores) and drives it with synthesised touch events | Touch detection; low tier auto-selected with grain/glow off and DPR capped; rotate gate in portrait; twin-stick deadzone, rim clamping and full-tilt sprint; **the survivor physically moves around the map on thumb power**; aim stick + auto-fire; simultaneous multi-touch; every cluster button; ability cooldown ring; aim assist locking the nearest threat; GFX cycling; pause; auto-pause on rotate; then a **second boot with PointerEvent removed** to exercise the TouchEvent fallback — **87 checks** |
+| **loot** | Headless sim-level coverage of the whole loot system, with a seeded RNG so the statistical tests can't flake | Deterministic breakable seeding; destruction by melee, bullet and overkill; exactly-one-drop guarantee; tier distribution measured over many rolls; per-container character (crates favour weapons, barrels favour the rare tier); barrel detonation, chaining and mass-detonation without stack overflow; auto-pickup vs slotted pickup; the 2-slot inventory (swap, duplicate-gun-to-ammo, third-gun-drop); throwable stack caps, fuses, molotov fire pools, bomb blasts; kevlar absorb; cross-stage carry-over and defeat wiping it; snapshot fields; plus a 45-second "loot goblin" stability run — **122 checks** |
+| **deploy** | Static + live checks of the render.com contract | Blueprint fields, package scripts, `PORT`/`0.0.0.0`/SIGTERM/exception guards, no-cache static serving, no hard-coded host in the client, `wss://` upgrade on HTTPS, mobile viewport metas and safe-area insets, no third-party origins; then **spawns the server on an injected port**, hits `/health`, and asserts a clean exit 0 on SIGTERM — **51 checks** |
 
-Current state: **all four suites green.**
+Current state: **all seven suites green** — 66 + 86 + 87 + 122 + 51 = 412 counted checks, plus the balance and dom contracts.
 
 ---
 

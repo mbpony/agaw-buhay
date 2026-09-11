@@ -186,8 +186,8 @@
       const c = e.tier === 'boss' ? '#ff2d55' : e.tier === 'special' ? '#ffb02e' : '#8b8f99';
       return `<div class="kv"><span style="color:${c}"><b style="color:${c}">${e.name}</b> — ${e.variant}</span><span class="hint" style="max-width:56%;text-align:right">${e.desc}</span></div>`;
     }).join('');
-    $('howKeys').innerHTML = [['WASD', 'Move'], ['Mouse', 'Aim'], ['LMB', 'Fire'], ['Shift', 'Sprint'], ['R', 'Reload'], ['Space', 'Ability'], ['E', 'Interact / Revive / Break pin'], ['F', 'Melee'], ['T', 'Chat'], ['Esc', 'Pause'], ['M', 'Mute'], ['Tab', 'Scoreboard']]
-      .concat(touch.on ? [['LEFT PAD', 'Move (full tilt sprints)'], ['RIGHT PAD', 'Aim — deflect to auto-fire'], ['FIRE / ABILITY / USE / RLD / HIT / RUN', 'Thumb cluster'], ['GFX', 'Cycle graphics quality']] : []).map(k => `<div class="key"><kbd>${k[0]}</kbd> ${k[1]}</div>`).join('');
+    $('howKeys').innerHTML = [['WASD', 'Move'], ['Mouse', 'Aim'], ['LMB', 'Fire'], ['Shift', 'Sprint'], ['R', 'Reload'], ['Space', 'Ability'], ['E', 'Interact / Revive / Take loot'], ['F', 'Melee'], ['Q', 'Swap weapon (slot 2)'], ['G', 'Throw molotov / bomb'], ['T', 'Chat'], ['Esc', 'Pause'], ['M', 'Mute'], ['Tab', 'Scoreboard']]
+      .concat(touch.on ? [['LEFT PAD', 'Move (full tilt sprints)'], ['RIGHT PAD', 'Aim — deflect to auto-fire'], ['FIRE / ABILITY / USE / RLD / HIT / RUN', 'Thumb cluster'], ['SWAP / THROW', 'Second weapon and grenades'], ['GFX', 'Cycle graphics quality']] : []).map(k => `<div class="key"><kbd>${k[0]}</kbd> ${k[1]}</div>`).join('');
   }
 
   /* ================= LOBBY ================= */
@@ -296,6 +296,8 @@
       app.you = 'local_you';
       app.sim.addSurvivor({ id: app.you, name: profile.name, hero, isBot: false });
       for (const h of D.SURVIVOR_ORDER) { if (h === hero) continue; app.sim.addSurvivor({ id: 'bot_' + h, name: D.SURVIVORS[h].name, hero: h, isBot: true }); }
+      // gear earned in the previous stage survives the transition
+      if (app.carry) { app.sim.importCarry(app.carry); app.carry = null; }
       renderer.setLevel(LV.serialize(level));
       renderer.ambient = stage.light; renderer.ambientKind = stage.ambient; renderer.youId = app.you;
       renderer.buf.length = 0; renderer.fx.clear();
@@ -365,7 +367,7 @@
     $('btnNext').onclick = () => {
       $('sc-results').classList.add('hidden');
       if (app.mode === 'net') { send({ t: 'restart', stage: nextStage.id }); }
-      else { $('sStage').value = nextStage.id; startSolo(); }
+      else { app.carry = (app.sim && app.sim.phase === 'victory') ? app.sim.exportCarry() : null; $('sStage').value = nextStage.id; startSolo(); }
     };
     $('btnReplay').onclick = () => {
       $('sc-results').classList.add('hidden');
@@ -396,6 +398,8 @@
     if (e.code === 'KeyT' && app.screen === 'game' && app.mode === 'net') { e.preventDefault(); openChat(); }
     if (e.code === 'KeyM') { settings.muted = !settings.muted; AU.setMuted(!!settings.muted); toast(settings.muted ? 'Audio muted' : 'Audio on'); }
     if (e.code === 'KeyR' && app.screen === 'game') input.reload = true;
+    if (e.code === 'KeyQ' && app.screen === 'game' && !e.repeat) input.swapQueued = true;
+    if (e.code === 'KeyG' && app.screen === 'game' && !e.repeat) input.throwQueued = true;
     if (['Space', 'KeyE', 'ShiftLeft', 'ShiftRight'].includes(e.code)) e.preventDefault();
   });
   addEventListener('keyup', e => {
@@ -427,10 +431,28 @@
     if (use) {
       let label = 'USE';
       if (me && me.pn > 0) label = 'BREAK';
-      else if (me && me.it) label = me.it.kind === 'revive' ? 'REVIVE' : me.it.kind === 'generator' ? 'POWER' : 'PICKUP';
+      else if (me && me.it) label = me.it.kind === 'revive' ? 'REVIVE' : me.it.kind === 'generator' ? 'POWER' : me.it.kind === 'loot' ? 'TAKE' : 'PICKUP';
       const b = use.querySelector('b');
       if (b && b.textContent !== label) b.textContent = label;
       use.classList.toggle('hi', !!(me && (me.it || me.pn > 0)));
+    }
+    const sw = $('tSwap');
+    if (sw) {
+      const has = !!(me && me.w2);
+      sw.disabled = !has;
+      sw.classList.toggle('hi', has);
+      const b = sw.querySelector('b');
+      const t = has ? shortName((D.WEAPONS[me.w2] || {}).name) : 'SWAP';
+      if (b && b.textContent !== t) b.textContent = t;
+    }
+    const th = $('tThrow');
+    if (th) {
+      const has = !!(me && me.tn > 0);
+      th.disabled = !has;
+      th.classList.toggle('hi', has);
+      const b = th.querySelector('b');
+      const t = has ? 'THROW x' + me.tn : 'THROW';
+      if (b && b.textContent !== t) b.textContent = t;
     }
     const rld = $('tReload');
     if (rld) rld.classList.toggle('pressed', !!(me && me.rl > 0));
@@ -476,7 +498,7 @@
     move: { id: null, x: 0, y: 0 },
     aim: { id: null, x: 0, y: 0 },
     fire: false, use: false, sprint: false,
-    abilityT: 0, meleeT: 0, reloadT: 0,
+    abilityT: 0, meleeT: 0, reloadT: 0, swapT: 0, throwT: 0,
     autoFire: true, assist: true, fsTried: false
   };
   function allPts(e) {
@@ -604,6 +626,8 @@
     bindBtn('tMelee', () => { touch.meleeT = 0.22; });
     bindBtn('tReload', () => { touch.reloadT = 0.3; });
     bindBtn('tAbility', () => { touch.abilityT = 0.22; });
+    bindBtn('tSwap', () => { touch.swapT = 0.22; });
+    bindBtn('tThrow', () => { touch.throwT = 0.22; });
     bindBtn('tSprint', () => {
       touch.sprint = !touch.sprint;
       const b = $('tSprint'); if (b) b.classList.toggle('on', touch.sprint);
@@ -669,6 +693,8 @@
       touch.abilityT = Math.max(0, touch.abilityT - 1 / 60);
       touch.meleeT = Math.max(0, touch.meleeT - 1 / 60);
       touch.reloadT = Math.max(0, touch.reloadT - 1 / 60);
+      touch.swapT = Math.max(0, touch.swapT - 1 / 60);
+      touch.throwT = Math.max(0, touch.throwT - 1 / 60);
     }
     // auto-fire while the aim stick is deflected (thumb cannot reach FIRE and aim at once)
     input.fire = (touch.on ? (touch.fire || (touch.autoFire && aimDeflect > 0.2)) : mouse.down) && !app.paused;
@@ -676,6 +702,12 @@
     input.ability = !!keys.Space || touch.abilityT > 0;
     input.interact = !!keys.KeyE || touch.use;
     if (touch.reloadT > 0) input.reload = true;
+    // swap / throw are edge actions: latch them until the sim or the network
+    // actually consumes them, so a tap between 30Hz packets is never dropped
+    if (input.swapQueued || touch.swapT > 0) { input.swapLatch = true; input.swapQueued = false; }
+    if (input.throwQueued || touch.throwT > 0) { input.throwLatch = true; input.throwQueued = false; }
+    input.swap = !!input.swapLatch;
+    input.throw = !!input.throwLatch;
     input.melee = !!input.melee || !!keys.KeyF || touch.meleeT > 0;
     if (keys.KeyF) input.melee = true; else if (!mouse.down && touch.meleeT <= 0) input.melee = input.melee && keys.KeyF;
     return input;
@@ -684,6 +716,30 @@
     const s = app.lastSnap;
     if (!s) return null;
     return s.surv.find(x => x.id === app.you) || null;
+  }
+
+  /* Carried gear: slot 2, throwables, armour. */
+  function shortName(n) { const p = String(n || '').split(' '); return (p.length > 1 ? p[p.length - 1] : p[0]).toUpperCase(); }
+  function updateGearHud(me) {
+    const g2 = $('gslot2');
+    if (g2) {
+      const w2 = me.w2 ? D.WEAPONS[me.w2] : null;
+      g2.classList.toggle('empty', !w2);
+      $('gslot2n').textContent = w2 ? shortName(w2.name) : 'EMPTY';
+      $('gslot2a').textContent = w2 ? (me.m2 + '/' + me.r2) : '[Q]';
+    }
+    const gt = $('gthrow');
+    if (gt) {
+      const t = me.th ? D.THROWABLES[me.th] : null;
+      gt.classList.toggle('empty', !t);
+      $('gthrown').textContent = t ? 'x' + me.tn : '0';
+      $('gthrowk').textContent = t ? shortName(t.name) : 'NONE';
+    }
+    const ga = $('garmor');
+    if (ga) {
+      ga.classList.toggle('empty', !(me.ar > 0));
+      $('garmorn').textContent = Math.round(me.ar || 0);
+    }
   }
 
   /* ================= HUD ================= */
@@ -752,10 +808,11 @@
     });
     // ammo
     if (me) {
-      const hero = D.SURVIVORS[me.hero], w = D.WEAPONS[hero.weapon];
+      const hero = D.SURVIVORS[me.hero], w = D.WEAPONS[me.wp] || D.WEAPONS[hero.weapon];
       $('ammo').innerHTML = me.mag + '<small>/' + me.res + '</small>';
       $('ammo').classList.toggle('low', me.mag <= w.mag * 0.25);
       $('wname').textContent = w.name + ' · ' + hero.melee;
+      updateGearHud(me);
       const rb = $('reloadbar');
       if (me.rl > 0) { rb.style.display = 'block'; rb.firstElementChild.style.width = (1 - me.rl / w.reload) * 100 + '%'; }
       else rb.style.display = 'none';
@@ -763,9 +820,12 @@
       const pr = $('prompt');
       if (me.it) {
         pr.style.opacity = '1';
-        const label = me.it.kind === 'revive' ? 'Hold to revive ' + (s.surv.find(x => x.id === me.it.id) || {}).name : me.it.kind === 'generator' ? 'Hold to restart generator' : 'Hold [E]';
+        const loot = me.it.kind === 'loot';
+        const label = me.it.kind === 'revive' ? 'Hold to revive ' + (s.surv.find(x => x.id === me.it.id) || {}).name
+          : me.it.kind === 'generator' ? 'Hold to restart generator'
+          : loot ? 'Take ' + (me.it.label || 'item') : 'Hold [E]';
         pr.querySelector('.pt').textContent = label;
-        pr.querySelector('#promptbar i').style.width = clamp((me.ip || me.it.p || 0) * 100, 0, 100) + '%';
+        pr.querySelector('#promptbar i').style.width = loot ? '100%' : clamp((me.ip || me.it.p || 0) * 100, 0, 100) + '%';
       } else if (me.pn > 0) {
         pr.style.opacity = '1';
         pr.querySelector('.pt').textContent = 'MASH [E] TO BREAK FREE';
@@ -844,6 +904,7 @@
           fx = fx.concat(app.sim.takeFx());
           app.localAcc -= 1 / 60;
         }
+        if (guard > 0) { inp.swapLatch = false; inp.throwLatch = false; }
         const snap = app.sim.snapshot();
         snap.you = app.you;
         snap.fxp = fx;
@@ -864,8 +925,8 @@
         netAcc += dt;
         if (netAcc > 1 / 30) {
           netAcc = 0;
-          send({ t: 'input', i: app.paused ? null : { mx: +inp.mx.toFixed(2), my: +inp.my.toFixed(2), aimx: +inp.aimx.toFixed(2), aimy: +inp.aimy.toFixed(2), fire: inp.fire, sprint: inp.sprint, reload: !!inp.reload, ability: inp.ability, interact: inp.interact, melee: !!inp.melee } });
-          inp.reload = false; inp.melee = false;
+          send({ t: 'input', i: app.paused ? null : { mx: +inp.mx.toFixed(2), my: +inp.my.toFixed(2), aimx: +inp.aimx.toFixed(2), aimy: +inp.aimy.toFixed(2), fire: inp.fire, sprint: inp.sprint, reload: !!inp.reload, ability: inp.ability, interact: inp.interact, melee: !!inp.melee, swap: !!inp.swap, throw: !!inp.throw } });
+          inp.reload = false; inp.melee = false; inp.swapLatch = false; inp.throwLatch = false;
         }
         pingAcc += dt;
         if (pingAcc > 1) { pingAcc = 0; send({ t: 'ping', c: performance.now() }); }

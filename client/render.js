@@ -316,6 +316,19 @@
     }
     setLevel(levelData) {
       this.level = LV.deserialize ? (levelData.grid instanceof Uint8Array ? levelData : LV.deserialize(levelData)) : levelData;
+      /* Loot containers. The level carries their static placement; the snapshot
+         only sends damage deltas (bk), keyed by this index. */
+      this.breakByN = [];
+      {
+        const bl = (this.level && this.level.breakables) || [];
+        for (let i = 0; i < bl.length; i++) {
+          const b = bl[i], def = D.BREAKABLES[b.t] || {};
+          this.breakByN.push({
+            n: i, t: b.t, x: b.x, y: b.y, rot: b.rot || 0, seed: b.seed || 0,
+            hp: 1, dead: false, r: def.r || 15, color: def.color || '#a9762f'
+          });
+        }
+      }
       this.biome = this.level.biome;
       this.atlas = buildTiles(this.level.tile, this.biome);
       this.wallH = this.biome === 'station' ? 42 : this.biome === 'skyway' ? 20 : 34;
@@ -380,6 +393,12 @@
           const sp = hero.stats.speed * (this.predInput.sprint ? 1.42 : 1) * 0.085;
           const nx = me.x + (this.predInput.mx || 0) * sp, ny = me.y + (this.predInput.my || 0) * sp;
           if (!LV.isSolid(this.level, nx, ny)) { me.x = nx; me.y = ny; }
+        }
+      }
+      if (snap.bk && this.breakByN) {
+        for (const d of snap.bk) {
+          const b = this.breakByN[d.n];
+          if (b) { b.dead = d.h < 0; b.hp = d.h < 0 ? 0 : d.h / 100; }
         }
       }
       this.snap = snap; this.ents = ents;
@@ -473,6 +492,7 @@
       for (const e of ents.en) if (this.visible(e.x, e.y, 160)) push(e.y, () => this.drawEnemy(ctx, e));
       for (const sv of ents.surv) if (this.visible(sv.x, sv.y, 160)) push(sv.y, () => this.drawSurvivor(ctx, sv));
       for (const p of L.props) if (this.visible(p.x, p.y, 260)) push(p.y, () => this.drawProp(ctx, p));
+      if (this.breakByN) for (const b of this.breakByN) if (this.visible(b.x, b.y, 130)) push(b.y, () => this.drawBreakable(ctx, b));
 
       const gx0 = Math.floor(this.view.x0 / (s * CHUNK)), gx1 = Math.floor(this.view.x1 / (s * CHUNK));
       const gy0 = Math.max(0, Math.floor(this.view.y0 / (s * CHUNK))), gy1 = Math.min(Math.ceil(L.h / CHUNK) - 1, Math.floor(this.view.y1 / (s * CHUNK)));
@@ -565,9 +585,15 @@
       for (const it of list) {
         if (!this.visible(it.x, it.y)) continue;
         const bob = Math.sin(it.b) * 3;
-        const def = D.PICKUPS[it.k] || D.PICKUPS.ammo;
+        const def = D.lootInfo(it.k);
         ctx.save();
         ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(it.x, it.y + 4, 11, 5, 0, 0, TAU); ctx.fill();
+        // slotted loot (weapons / armour / throwables) needs USE, so ring it
+        if (it.s) {
+          ctx.strokeStyle = hexA(def.color, .38 + .22 * Math.sin(this.time * 4 + it.b));
+          ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.ellipse(it.x, it.y + 4, 14, 6.5, 0, 0, TAU); ctx.stroke();
+        }
         ctx.translate(it.x, it.y - 8 + bob);
         // glow
         ctx.globalCompositeOperation = 'lighter';
@@ -588,10 +614,44 @@
           ctx.fillStyle = '#d8e6f0'; ctx.fillRect(-6, -8, 12, 16);
           ctx.fillStyle = '#5fa8d3'; ctx.fillRect(-6, -8, 12, 4);
           ctx.fillStyle = '#2f6f96'; ctx.fillRect(-3, -2, 6, 6);
-        } else {
+        } else if (it.k === 'adrenaline') {
           ctx.fillStyle = '#ffd9f2'; ctx.fillRect(-3, -9, 6, 14);
           ctx.fillStyle = '#ff4fb0'; ctx.fillRect(-3, -9, 6, 5);
           ctx.strokeStyle = '#c9d6dd'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, 5); ctx.lineTo(0, 10); ctx.stroke();
+        } else if (it.k === 'armor') {
+          ctx.fillStyle = '#33405c';
+          ctx.beginPath(); ctx.moveTo(-9, -8); ctx.lineTo(9, -8); ctx.lineTo(7, 8); ctx.lineTo(-7, 8); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = def.color; ctx.fillRect(-9, -8, 18, 3);
+          ctx.strokeStyle = 'rgba(255,255,255,.26)'; ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(0, 7); ctx.stroke();
+          ctx.fillStyle = 'rgba(0,0,0,.32)'; ctx.fillRect(-12, -6, 3, 7); ctx.fillRect(9, -6, 3, 7);
+        } else if (it.k.indexOf('w:') === 0) {
+          ctx.save(); ctx.rotate(-0.34);
+          ctx.fillStyle = '#2b2f36'; ctx.fillRect(-11, -3, 22, 6);
+          ctx.fillStyle = def.color; ctx.fillRect(-11, -3, 22, 2.2);
+          ctx.fillStyle = '#22262c'; ctx.fillRect(-3, 2, 5, 6);
+          ctx.fillRect(9, -2, 4, 3);
+          ctx.restore();
+        } else if (it.k.indexOf('t:') === 0) {
+          if (it.k === 't:molotov') {
+            ctx.fillStyle = '#3a5a2a'; ctx.beginPath(); ctx.ellipse(0, 1, 5, 7.5, 0, 0, TAU); ctx.fill();
+            ctx.fillStyle = def.color; ctx.fillRect(-1.6, -10, 3.2, 5);
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = 'rgba(255,190,80,.85)'; ctx.beginPath(); ctx.arc(0, -11, 3.2 + Math.sin(this.time * 12) * .6, 0, TAU); ctx.fill();
+            ctx.restore();
+          } else {
+            ctx.fillStyle = '#3d4148'; ctx.fillRect(-4, -8, 8, 16);
+            ctx.fillStyle = def.color; ctx.fillRect(-4, -8, 8, 3);
+            ctx.strokeStyle = '#c9b45a'; ctx.lineWidth = 1.2;
+            ctx.beginPath(); ctx.moveTo(0, -8); ctx.quadraticCurveTo(5, -13, 2, -16); ctx.stroke();
+            const sp = .5 + .5 * Math.sin(this.time * 18);
+            ctx.save(); ctx.globalCompositeOperation = 'lighter';
+            ctx.fillStyle = 'rgba(255,' + Math.round(150 + 80 * sp) + ',60,.9)';
+            ctx.beginPath(); ctx.arc(2, -16, 2.2 + sp, 0, TAU); ctx.fill(); ctx.restore();
+          }
+        } else {
+          ctx.fillStyle = def.color; ctx.fillRect(-7, -7, 14, 14);
+          ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1; ctx.strokeRect(-7, -7, 14, 14);
         }
         ctx.restore();
       }
@@ -1308,6 +1368,88 @@
     }
 
     /* ---------- projectiles / tracers ---------- */
+    /* ---- loot containers (destructible) ----
+       Drawn inside the y-sorted row pass so survivors pass in front of and
+       behind them correctly. Damage shows as cracks, dents and a lean; a
+       destroyed container leaves rubble instead of popping out of existence. */
+    drawBreakable(ctx, b) {
+      const def = D.BREAKABLES[b.t] || {};
+      const r = b.r || 15, z = def.z || 24, hurt = 1 - b.hp;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      if (b.dead) {
+        ctx.fillStyle = 'rgba(12,10,9,.5)';
+        ctx.beginPath(); ctx.ellipse(0, 2, r * 1.1, r * .45, 0, 0, TAU); ctx.fill();
+        ctx.globalAlpha = .62;
+        this.propDebris(ctx, { r: r * 1.1, seed: b.seed || 3 });
+        ctx.restore();
+        return;
+      }
+      // a faint pulse so containers read as lootable, not scenery
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const gl = ctx.createRadialGradient(0, 2, 1, 0, 2, r * 2.2);
+      gl.addColorStop(0, hexA(def.color || b.color, .12 + .05 * Math.sin(this.time * 2.1 + (b.seed || 0) * .013)));
+      gl.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = gl;
+      ctx.beginPath(); ctx.ellipse(0, 2, r * 2.2, r * 1.15, 0, 0, TAU); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = 'rgba(0,0,0,.42)';
+      ctx.beginPath(); ctx.ellipse(0, 4, r * .98, r * .42, 0, 0, TAU); ctx.fill();
+      ctx.rotate((b.rot || 0) + hurt * .07);
+      if (hurt > .5) ctx.translate(Math.sin(this.time * 30) * hurt * .7, 0);
+      const c = def.color || '#a9762f';
+      if (b.t === 'trash') {
+        ctx.fillStyle = shade(c, -.42); ctx.beginPath(); ctx.ellipse(0, 2, r * .82, r * .36, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = c; ctx.fillRect(-r * .78, -z, r * 1.56, z + 2);
+        ctx.fillStyle = shade(c, .2); ctx.beginPath(); ctx.ellipse(0, -z, r * .78, r * .32, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = 1.2;
+        for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(i * r * .42, -z + 3); ctx.lineTo(i * r * .42, 1); ctx.stroke(); }
+        ctx.fillStyle = shade(c, .32); ctx.fillRect(-r * .86, -z - 4, r * 1.72, 5);
+      } else if (b.t === 'barrel') {
+        ctx.fillStyle = shade(c, -.44); ctx.beginPath(); ctx.ellipse(0, 2, r * .86, r * .38, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = c; ctx.fillRect(-r * .82, -z, r * 1.64, z + 2);
+        ctx.fillStyle = shade(c, .22); ctx.beginPath(); ctx.ellipse(0, -z, r * .82, r * .34, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#f0c33c'; ctx.fillRect(-r * .82, -z * .64, r * 1.64, 5);
+        ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('!', 0, -z * .64 + 4.6);
+        ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(-r * .82, -z * .3); ctx.lineTo(r * .82, -z * .3); ctx.stroke();
+      } else {
+        const w = r * 1.9, h = r * 1.5;
+        this.propBox(ctx, { rot: 0 }, w, h, c, z, b.t === 'vending');
+        const fy0 = -h / 2 - z * .28, fy1 = h / 2 - z * .28;
+        if (b.t === 'crate') {
+          ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(-w / 2, fy0); ctx.lineTo(w / 2, fy1);
+          ctx.moveTo(w / 2, fy0); ctx.lineTo(-w / 2, fy1);
+          ctx.stroke();
+        } else if (b.t === 'box') {
+          ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(0, fy0); ctx.lineTo(0, fy1); ctx.stroke();
+          ctx.fillStyle = 'rgba(220,210,180,.22)'; ctx.fillRect(-w / 2, (fy0 + fy1) / 2 - 2, w, 4);
+        } else if (b.t === 'cabinet') {
+          const cy = (fy0 + fy1) / 2;
+          ctx.fillStyle = '#c62838';
+          ctx.fillRect(-2.4, cy - 6, 4.8, 12); ctx.fillRect(-7, cy - 2.2, 14, 4.4);
+        }
+      }
+      if (hurt > .18) {
+        ctx.strokeStyle = 'rgba(0,0,0,' + (.22 + hurt * .45).toFixed(2) + ')';
+        ctx.lineWidth = 1 + hurt;
+        const n = 1 + Math.floor(hurt * 3);
+        for (let i = 0; i < n; i++) {
+          const a = hash(i, b.seed || 5) * TAU, d = r * (.3 + hash(i + 3, b.seed || 5) * .55);
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * d, -z * .5 + Math.sin(a) * d * .5);
+          ctx.lineTo(Math.cos(a + 1.1) * d * 1.5, -z * .5 + Math.sin(a + 1.1) * d * .8);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
     drawProjectiles(ctx, list) {
       for (const p of list) {
         if (!this.visible(p.x, p.y, 60)) continue;
@@ -1319,6 +1461,16 @@
           const g = ctx.createRadialGradient(0, -4, 1, 0, -4, 16);
           g.addColorStop(0, 'rgba(255,200,90,.9)'); g.addColorStop(1, 'rgba(255,120,20,0)');
           ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, -4, 16, 0, TAU); ctx.fill(); ctx.restore();
+        } else if (p.k === 'bomb') {
+          ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(0, (p.z || 0) + 4, 6, 3, 0, 0, TAU); ctx.fill();
+          ctx.save(); ctx.rotate(this.time * 11);
+          ctx.fillStyle = '#3d4148'; ctx.fillRect(-4, -7, 8, 14);
+          ctx.fillStyle = '#c0392b'; ctx.fillRect(-4, -1.5, 8, 3);
+          ctx.restore();
+          const sp = .5 + .5 * Math.sin(this.time * 22);
+          ctx.save(); ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = 'rgba(255,' + Math.round(140 + 90 * sp) + ',60,.92)';
+          ctx.beginPath(); ctx.arc(0, -9, 2.4 + sp * 1.7, 0, TAU); ctx.fill(); ctx.restore();
         } else if (p.k === 'bile' || p.k === 'viscera') {
           const c = p.k === 'bile' ? 'rgba(150,230,80,.95)' : 'rgba(200,40,70,.95)';
           ctx.fillStyle = c;
@@ -1646,13 +1798,16 @@
             break;
           }
           case 'aura': this.fx.ring(f.x, f.y, f.r * .3, f.r, '#8ef0c0', .6, 2); break;
-          case 'explode':
+          case 'explode': {
+            const fire = f.kind === 'fire', hot = fire || f.kind === 'boom';
+            const col = fire ? '#ff9a3c' : (f.kind === 'boom' ? '#ffb02e' : '#a8ff60');
             AU.SFX.explode(pos, cam, this.viewW, f.r > 90);
-            this.fx.ring(f.x, f.y, 10, f.r * 1.5, f.kind === 'fire' ? '#ff9a3c' : '#a8ff60', .55, 5);
-            this.fx.burst(f.x, f.y, 26, { sp: 250, life: .8, r: 4, c: f.kind === 'fire' ? '#ff8b3a' : '#a8ff60', vz: 120, grav: 240 });
-            this.fx.burst(f.x, f.y, 14, { sp: 90, life: 1.6, r: 9, c: f.kind === 'fire' ? '#4a4a4a' : '#5a7a3a', kind: 'smoke', vz: 50, grav: -14 });
-            this.fx.decal(f.x, f.y, f.r * .8, f.kind === 'fire' ? 'rgba(15,12,10,.55)' : 'rgba(90,150,50,.3)', f.kind === 'fire' ? 'scorch' : 'acid');
+            this.fx.ring(f.x, f.y, 10, f.r * 1.5, col, .55, 5);
+            this.fx.burst(f.x, f.y, 26, { sp: 250, life: .8, r: 4, c: fire ? '#ff8b3a' : col, vz: 120, grav: 240 });
+            this.fx.burst(f.x, f.y, 14, { sp: 90, life: 1.6, r: 9, c: hot ? '#4a4a4a' : '#5a7a3a', kind: 'smoke', vz: 50, grav: -14 });
+            this.fx.decal(f.x, f.y, f.r * .8, hot ? 'rgba(15,12,10,.55)' : 'rgba(90,150,50,.3)', hot ? 'scorch' : 'acid');
             break;
+          }
           case 'flame':
             this.fx.burst(f.x, f.y, 1, { sp: 20, life: .8, r: 3.4, c: '#ff9a3c', vz: 60, grav: -30 });
             break;
@@ -1670,7 +1825,7 @@
           case 'reload': AU.SFX.reload(pos, cam, this.viewW); break;
           case 'reload_end': AU.SFX.ui('click'); break;
           case 'dry': AU.SFX.dry(pos, cam, this.viewW); break;
-          case 'pickup': AU.SFX.pickup(pos, cam, this.viewW, f.kind); this.fx.text(f.x, f.y - 40, f.txt, f.kind === 'medkit' ? '#5cff9d' : f.kind === 'ammo' ? '#ffcc44' : '#9ad7ff'); this.fx.ring(f.x, f.y, 6, 40, '#fff', .35, 2); break;
+          case 'pickup': AU.SFX.pickup(pos, cam, this.viewW, f.kind); this.fx.text(f.x, f.y - 40, f.txt, f.kind === 'medkit' ? '#5cff9d' : f.kind === 'ammo' ? '#ffcc44' : f.kind === 'weapon' ? '#ffd27a' : f.kind === 'throw' ? '#ff9a3c' : f.kind === 'armor' ? '#8fb4ff' : '#9ad7ff'); this.fx.ring(f.x, f.y, 6, 40, '#fff', .35, 2); break;
           case 'boss_spawn': AU.SFX.roar(pos, cam, this.viewW); this.fx.ring(f.x, f.y, 30, 460, '#ff2d55', 1.4, 8); this.fx.burst(f.x, f.y, 50, { sp: 320, life: 1.4, r: 5, c: '#5a2436', vz: 160, grav: 260 }); break;
           case 'boss_split': AU.SFX.screech(pos, cam, this.viewW); AU.SFX.roar(pos, cam, this.viewW); this.fx.ring(f.x, f.y, 20, 380, '#ff5f7a', 1.1, 6); this.fx.burst(f.x, f.y - 40, 60, { sp: 300, life: 1.2, r: 4, c: '#8e1b1b', vz: 180, grav: 300 }); break;
           case 'boss_die': AU.SFX.roar(pos, cam, this.viewW); AU.SFX.explode(pos, cam, this.viewW, true); this.fx.ring(f.x, f.y, 20, 520, '#ff2d55', 1.6, 9); this.fx.burst(f.x, f.y - 30, 90, { sp: 380, life: 1.8, r: 5, c: '#a01820', vz: 220, grav: 260 }); break;
@@ -1689,6 +1844,25 @@
           case 'objective': AU.SFX.ui('click'); break;
           case 'victory': AU.SFX.ui('win'); break;
           case 'defeat': AU.SFX.ui('lose'); break;
+          case 'break':
+            AU.SFX.smash(pos, cam, this.viewW);
+            this.fx.burst(f.x, f.y - 10, f.n || 9, { sp: 175, life: .7, r: 3.2, c: f.c || '#a9762f', vz: 155, grav: 430 });
+            this.fx.ring(f.x, f.y, 4, 34, hexA(f.c || '#a9762f', .85), .3, 2);
+            this.fx.decal(f.x, f.y, 17, 'rgba(20,18,16,.4)', 'scorch');
+            break;
+          case 'swap': AU.SFX.reload(pos, cam, this.viewW); this.fx.text(f.x, f.y - 46, 'SWAP', '#ffd27a'); break;
+          case 'deny': AU.SFX.dry(pos, cam, this.viewW); break;
+          case 'throw':
+            AU.SFX.ui('click');
+            this.fx.burst(f.x + Math.cos(f.a) * 14, f.y - 18 + Math.sin(f.a) * 14, 3, { sp: 60, life: .3, r: 1.6, c: '#d8d2c0', kind: 'spark', grav: 120 });
+            break;
+          case 'armor': this.fx.text(f.x, f.y - 44, '-' + f.v, '#8fb4ff'); break;
+          case 'armor_break':
+            AU.SFX.smash(pos, cam, this.viewW);
+            this.fx.text(f.x, f.y - 48, 'VEST SHREDDED', '#ff8080');
+            this.fx.ring(f.x, f.y, 8, 60, '#8fb4ff', .45, 3);
+            this.fx.burst(f.x, f.y - 14, 12, { sp: 150, life: .6, r: 2.6, c: '#8fb4ff', vz: 120, grav: 380 });
+            break;
           case 'stage_start': break;
           default: break;
         }

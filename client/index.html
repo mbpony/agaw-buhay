@@ -184,6 +184,17 @@ label.f{display:block;font:700 10px/1 var(--mono);letter-spacing:.2em;color:var(
 #wname{font:700 10px/1 var(--mono);letter-spacing:.22em;color:var(--dim);text-transform:uppercase;margin-top:6px}
 #reloadbar{width:150px;height:4px;background:rgba(255,255,255,.14);margin:7px 0 0 auto;display:none}
 #reloadbar i{display:block;height:100%;background:var(--amber);width:0}
+/* carried gear: second weapon slot, throwables, armour */
+#gear{display:flex;gap:5px;justify-content:flex-end;margin-bottom:6px}
+.gitem{min-width:50px;padding:3px 6px 2px;background:rgba(8,10,15,.76);border:1px solid var(--line);
+  border-left:2px solid var(--dim);text-align:right}
+.gitem b{display:block;font:800 12px/1.1 var(--mono);color:#fff}
+.gitem span{display:block;font:700 7px/1.3 var(--mono);letter-spacing:.08em;color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.gitem i{display:block;font:600 7px/1.3 var(--mono);color:var(--dim);font-style:normal;white-space:nowrap}
+.gitem.empty{opacity:.32}
+#gslot2{border-left-color:#ffd27a}
+#gthrow{border-left-color:#ff9a3c}
+#garmor{border-left-color:#8fb4ff}
 
 #center{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);text-align:center;width:min(760px,90vw)}
 #announce{font:900 clamp(26px,5.2vw,58px)/1 var(--font);letter-spacing:.02em;text-transform:uppercase;color:#fff;
@@ -250,8 +261,8 @@ body.touch #touch.on{display:block}
   bottom:calc(16px + env(safe-area-inset-bottom));width:124px;height:124px}
 #tRight{position:absolute;right:calc(12px + env(safe-area-inset-right));
   bottom:calc(14px + env(safe-area-inset-bottom));display:flex;align-items:flex-end;gap:9px}
-#tBtns{display:grid;grid-template-columns:repeat(3,50px);grid-auto-rows:50px;gap:7px}
-.tbtn{position:relative;width:50px;height:50px;border-radius:50%;padding:0;overflow:hidden;
+#tBtns{display:grid;grid-template-columns:repeat(4,46px);grid-auto-rows:46px;gap:6px}
+.tbtn{position:relative;width:46px;height:46px;border-radius:50%;padding:0;overflow:hidden;
   border:1px solid rgba(255,255,255,.17);color:#e8e6df;touch-action:none;pointer-events:auto;
   background:radial-gradient(circle at 50% 28%,rgba(48,54,68,.94),rgba(11,13,19,.94));
   font:800 8.5px/1.15 var(--mono);letter-spacing:.06em;text-transform:uppercase;
@@ -365,6 +376,11 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
     </div>
     <div class="hud-bl" id="squad"></div>
     <div class="hud-br">
+      <div id="gear">
+        <div class="gitem empty" id="gslot2"><b>2</b><span id="gslot2n">EMPTY</span><i id="gslot2a">[Q]</i></div>
+        <div class="gitem empty" id="gthrow"><b id="gthrown">0</b><span id="gthrowk">NONE</span><i>[G]</i></div>
+        <div class="gitem empty" id="garmor"><b id="garmorn">0</b><span>VEST</span><i>&nbsp;</i></div>
+      </div>
       <div id="ammo">30<small>/180</small></div>
       <div id="wname">Burst Rifle</div>
       <div id="reloadbar"><i></i></div>
@@ -615,9 +631,11 @@ body.touch #chatinput{font-size:16px}   /* >=16px stops iOS auto-zoom on focus *
         <button class="tbtn" id="tUse" aria-label="Interact or revive"><b>USE</b></button>
         <button class="tbtn" id="tReload" aria-label="Reload"><b>RLD</b></button>
         <button class="tbtn" id="tMelee" aria-label="Melee"><b>HIT</b></button>
+        <button class="tbtn" id="tSwap" aria-label="Swap weapon"><b>SWAP</b></button>
         <button class="tbtn" id="tSprint" aria-label="Sprint toggle"><b>RUN</b></button>
         <button class="tbtn fire" id="tFire" aria-label="Fire"><b>FIRE</b></button>
         <button class="tbtn" id="tAbility" aria-label="Ability"><b>ABILITY</b><span class="ring"></span></button>
+        <button class="tbtn" id="tThrow" aria-label="Throw grenade or molotov"><b>THROW</b></button>
       </div>
       <div class="pad" id="tAim"><i></i><span class="hint">Aim</span></div>
     </div>

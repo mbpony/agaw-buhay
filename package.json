@@ -12,6 +12,7 @@
     "test:client": "node test/client.js",
     "test:mobile": "node test/mobile.js",
     "test:deploy": "node test/deploy.js",
+    "test:loot": "node test/loot.js",
     "test:dom": "node test/domcheck.js"
   },
   "engines": {

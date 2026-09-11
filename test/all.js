@@ -36,6 +36,7 @@ function run(label, file, args) {
   results.push(['network protocol', run('NETWORK PROTOCOL', 'net.js')]);
   results.push(['headless client (desktop)', run('HEADLESS CLIENT — DESKTOP', 'client.js')]);
   results.push(['mobile landscape + touch', run('MOBILE — LANDSCAPE + TOUCH', 'mobile.js')]);
+  results.push(['loot + breakables + inventory', run('LOOT / BREAKABLES / INVENTORY', 'loot.js')]);
   results.push(['deploy readiness (render.com)', run('DEPLOY READINESS', 'deploy.js')]);
 
   if (srv) srv.kill();

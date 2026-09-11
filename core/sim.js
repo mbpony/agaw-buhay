@@ -12,6 +12,8 @@
   'use strict';
 
   const SUR = D.SURVIVORS, WEP = D.WEAPONS, EN = D.ENEMIES;
+  const BRK = D.BREAKABLES, THR = D.THROWABLES, EQP = D.EQUIPMENT;
+  const MAX_BREAKS = 96;
   const MAX_ENEMIES = 168, MAX_TRACERS = 220, MAX_PROJ = 90, MAX_HAZ = 60, MAX_ITEMS = 60;
   const DOWN_TIME = 40;
 
@@ -31,6 +33,7 @@
       this.phase = 'playing';
       this.survivors = []; this.enemies = []; this.tracers = []; this.proj = [];
       this.hazards = []; this.items = []; this.corpses = []; this.fx = [];
+      this.breaks = [];
       this.kills = 0; this.score = 0; this.headshots = 0;
       this.shake = 0; this.flash = 0;
       this.flowIdx = 0; this.flowT = 0; this.holdT = 0; this.extractT = 0;
@@ -46,6 +49,7 @@
       this.msg = [];
       // pre-place some pickups
       this.seedItems();
+      this.seedBreakables();
       this.pushFx('stage_start', { name: this.stage.name, obj: this.stage.objective });
       this.setAnnounce(this.stage.name.toUpperCase(), 4);
       this.objectives = (this.level.objectives || []).map(o => Object.assign({}, o));
@@ -62,8 +66,11 @@
         vx: 0, vy: 0, z: 0, aim: this.level.startDir || 0,
         hp: hero.stats.maxHp, maxHp: hero.stats.maxHp, sta: hero.stats.stamina, maxSta: hero.stats.stamina,
         down: false, dead: false, bleed: 0, reviveP: 0, reviver: null,
+        wpn: hero.weapon, alt: null,
         mag: WEP[hero.weapon].mag, reserve: Math.round(WEP[hero.weapon].reserve * hero.stats.ammoMul),
         maxReserve: Math.round(WEP[hero.weapon].reserve * hero.stats.ammoMul),
+        thrKind: null, thrN: 0, throwCd: 0, swapCd: 0, lootCd: 0,
+        armor: 0, armorMax: 0,
         fireCd: 0, reloading: 0, burstLeft: 0, burstCd: 0,
         abCd: 0, abActive: 0, abData: null,
         sprint: false, walk: 0, moving: 0, pin: 0, pinBy: null, iframe: 0,
@@ -76,7 +83,7 @@
       return s;
     }
     hero(s) { return SUR[s.hero]; }
-    weap(s) { return WEP[this.hero(s).weapon]; }
+    weap(s) { return WEP[s.wpn] || WEP[this.hero(s).weapon]; }
 
     aliveSurvivors() { return this.survivors.filter(s => !s.dead); }
     standingSurvivors() { return this.survivors.filter(s => !s.dead && !s.down); }
@@ -202,6 +209,13 @@
       // melee (Batuta / Scalpel / Wrench / Itak)
       if (inp.melee && s.meleeCd <= 0) this.melee(s);
 
+      // weapon swap (Q / SWAP) and throwables (G / THROW)
+      if (s.swapCd > 0) s.swapCd -= dt;
+      if (s.throwCd > 0) s.throwCd -= dt;
+      if (s.lootCd > 0) s.lootCd -= dt;
+      if (inp.swap && s.swapCd <= 0) this.swapWeapon(s);
+      if (inp.throw && s.throwCd <= 0) this.throwItem(s);
+
       // ability
       if (inp.ability && s.abCd <= 0 && s.abActive <= 0) this.useAbility(s);
 
@@ -236,7 +250,7 @@
           }
         }
       }
-      if (s.burning > 0) { s.burning -= dt; if (Math.random() < dt * 3) this.damageSurvivor(s, 2, null, 'fire'); }
+      if (s.burning > 0) { s.burning -= dt; if (this.rnd() < dt * 3) this.damageSurvivor(s, 2, null, 'fire'); }
     }
 
     melee(s) {
@@ -258,6 +272,18 @@
         e.vx += Math.cos(ka) * (e.boss ? 20 : 260); e.vy += Math.sin(ka) * (e.boss ? 20 : 260);
         e.stun = Math.max(e.stun || 0, 0.28);
         this.pushFx('blood', { x: e.x, y: e.y, a: ka, n: 4, c: '#8e1b1b' });
+      }
+      // the same swing smashes loot containers in the arc
+      for (const b of this.breaks) {
+        if (b.dead) continue;
+        const bx = b.x - s.x, by = b.y - s.y;
+        const rr = 58 + (BRK[b.t].r || 15);
+        if (bx * bx + by * by > rr * rr) continue;
+        let da = Math.atan2(by, bx) - a0;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        if (Math.abs(da) > 1.15) continue;
+        this.damageBreak(b, md * 0.6, s);   // a swing chips containers; guns open them faster
+        hitAny = true;
       }
       if (hitAny) this.shake = Math.min(12, this.shake + 3);
     }
@@ -313,7 +339,7 @@
       // recoil kick
       s.vx -= Math.cos(s.aim) * (w.knock || 20) * 0.16;
       s.vy -= Math.sin(s.aim) * (w.knock || 20) * 0.16;
-      this.pushFx('shot', { x: s.x + Math.cos(s.aim) * 20, y: s.y + Math.sin(s.aim) * 20, a: s.aim, id: s.id, w: this.hero(s).weapon, dual: w.dual ? (s.mag % 2) : 0 });
+      this.pushFx('shot', { x: s.x + Math.cos(s.aim) * 20, y: s.y + Math.sin(s.aim) * 20, a: s.aim, id: s.id, w: s.wpn, dual: w.dual ? (s.mag % 2) : 0 });
       this.dir.stress = Math.min(1.6, this.dir.stress + 0.012);
     }
 
@@ -342,10 +368,25 @@
         const rr = (e.radius || 16) + 3;
         if (perp < rr) cands.push({ e, d: proj, perp });
       }
+      // loot containers stop a round and take the damage
+      for (const b of this.breaks) {
+        if (b.dead) continue;
+        const ex = b.x - shooter.x, ey = b.y - shooter.y;
+        const proj = ex * dx + ey * dy;
+        if (proj < 0 || proj > range) continue;
+        const perp = Math.abs(ex * dy - ey * dx);
+        if (perp < (BRK[b.t].r || 15) + 2) cands.push({ b, d: proj, perp });
+      }
       cands.sort((a, b) => a.d - b.d);
       let finalX = hitX, finalY = hitY;
       for (const c of cands) {
         if (c.d > (hitWall ? Math.hypot(hitX - shooter.x, hitY - shooter.y) : range)) break;
+        if (c.b) {
+          this.damageBreak(c.b, w.dmg, shooter);
+          finalX = c.b.x; finalY = c.b.y;
+          this.pushFx('spark', { x: c.b.x, y: c.b.y, a: angle });
+          break;
+        }
         if (hitSet.has(c.e.id)) continue;
         const crit = c.perp < (c.e.radius || 16) * 0.42;
         let dmg = w.dmg * (crit ? 1.7 : 1) * (c.e.boss ? 1 : 1);
@@ -446,6 +487,14 @@
         this.pushFx('hurt_down', { x: s.x, y: s.y, id: s.id });
         return;
       }
+      // kevlar soaks a share of every hit until the pool is empty
+      if (s.armor > 0 && dmg > 0) {
+        const soak = Math.min(s.armor, dmg * ((EQP.armor && EQP.armor.absorb) || 0.45));
+        s.armor -= soak; dmg -= soak;
+        this.pushFx('armor', { x: s.x, y: s.y, id: s.id, v: Math.round(soak) });
+        if (s.armor <= 0) { s.armor = 0; this.pushFx('armor_break', { x: s.x, y: s.y, id: s.id }); }
+      }
+      if (dmg <= 0) { s.hurtT = 0.3; return; }
       s.hp -= dmg; s.hurtT = 0.42;
       this.shake = Math.min(18, this.shake + dmg * 0.16);
       this.dmgWindow.push({ t: this.time, v: dmg });
@@ -535,6 +584,21 @@
           s.vx *= 0.4; s.vy *= 0.4;
         } else if (best.reviver === s) { best.reviver = null; best.reviveP = Math.max(0, best.reviveP - dt * 0.35); }
         return;
+      }
+      // slotted loot: taken on press, no hold needed
+      if ((s.lootCd || 0) <= 0) {
+        let bi = null, bd2 = 54 * 54;
+        for (const it of this.items) {
+          if (it.taken || D.lootInfo(it.kind).slot === 'use') continue;
+          const d = dist2(it.x, it.y, s.x, s.y);
+          if (d < bd2) { bd2 = d; bi = it; }
+        }
+        if (bi) {
+          const info = D.lootInfo(bi.kind);
+          s.interactTarget = { kind: 'loot', id: bi.id, label: info.name, color: info.color };
+          if (held) this.pickupSlotted(s, bi);
+          return;
+        }
       }
       // generators
       for (const g of this.objectives) {
@@ -1203,13 +1267,22 @@
         p.life -= dt;
         p.x += p.vx * dt; p.y += p.vy * dt;
         if (p.vz !== undefined) { p.z += p.vz * dt; p.vz -= 340 * dt; if (p.z < 0) p.z = 0; }
-        if (p.kind === 'molotov') {
-          if (p.life <= 0 || p.z <= 0.5) {
+        if (p.kind === 'molotov' || p.kind === 'bomb') {
+          const tw = p.thrown ? THR[p.kind] : null;
+          const wallHit = p.kind === 'bomb' && LV.isSolid(L, p.x, p.y);
+          if (p.life <= 0 || p.z <= 0.5 || wallHit) {
             p.dead = true;
-            this.addHazard({ x: p.x, y: p.y, r: 88, dmg: 7, life: 6, kind: 'fire', friendly: true });
-            this.pushFx('explode', { x: p.x, y: p.y, r: 104, kind: 'fire' });
-            this.shake = Math.min(16, this.shake + 6);
-            for (const e of this.enemies) if (!e.dead && dist2(e.x, e.y, p.x, p.y) < 130 * 130) this.damageEnemy(e, 40, p.owner, true);
+            if (p.kind === 'molotov') {
+              const r = tw ? tw.aoe * 0.78 : 88, life = tw ? tw.linger : 6, hd = tw ? tw.dmg : 7;
+              this.addHazard({ x: p.x, y: p.y, r, dmg: hd, life, kind: 'fire', friendly: true });
+              this.pushFx('explode', { x: p.x, y: p.y, r: tw ? tw.aoe : 104, kind: 'fire' });
+              this.shake = Math.min(16, this.shake + 6);
+              const burst = tw ? tw.dmg * 2.6 : 40;
+              for (const e of this.enemies) if (!e.dead && dist2(e.x, e.y, p.x, p.y) < 130 * 130) this.damageEnemy(e, burst, p.owner, true);
+              if (tw) this.damageBreaksIn(p.x, p.y, tw.aoe, burst * 0.6, p.owner);
+            } else {
+              this.detonate(p.x, p.y, tw ? tw.dmg : 150, tw ? tw.aoe : 168, p.owner, 'boom');
+            }
           }
           continue;
         }
@@ -1289,6 +1362,9 @@
       for (const it of this.items) {
         if (it.taken) continue;
         it.bob += dt * 3;
+        // weapons / armour / throwables occupy a slot, so they are taken
+        // deliberately with USE instead of by walking over them
+        if (D.lootInfo(it.kind).slot !== 'use') continue;
         for (const s of this.survivors) {
           if (s.dead || s.down) continue;
           if (dist2(s.x, s.y, it.x, it.y) < 30 * 30) {
@@ -1301,6 +1377,166 @@
             break;
           }
         }
+      }
+    }
+
+    /* =============== BREAKABLES & LOOT =============== */
+    seedBreakables() {
+      const list = this.level.breakables || [];
+      this.breaks = [];
+      for (let i = 0; i < list.length && this.breaks.length < MAX_BREAKS; i++) {
+        const b = list[i], def = BRK[b.t];
+        if (!def) continue;
+        this.breaks.push({
+          n: i, id: b.id, t: b.t, x: b.x, y: b.y, rot: b.rot || 0, seed: b.seed || 0,
+          hp: def.hp, maxHp: def.hp, dead: false, flash: 0
+        });
+      }
+    }
+    damageBreak(b, dmg, src) {
+      if (b.dead || !(dmg > 0)) return;
+      b.hp -= dmg; b.flash = 0.12;
+      if (b.hp <= 0) this.breakOpen(b, src);
+    }
+    breakOpen(b, src) {
+      if (b.dead) return;
+      b.dead = true; b.hp = 0;
+      const def = BRK[b.t] || {};
+      this.score += def.score || 5;
+      this.pushFx('break', { x: b.x, y: b.y, t: b.t, c: def.color || '#a9762f', n: 9 });
+      // ONE roll, server-side, from the sim RNG — every client sees the same drop
+      const roll = D.rollLoot(def.table || 'crate', this.rnd);
+      this.spawnItem(b.x + (this.rnd() - .5) * 14, b.y + (this.rnd() - .5) * 14, roll.kind);
+      if (def.explode) this.detonate(b.x, b.y, def.explode.dmg, def.explode.r, src, 'boom', def.explode);
+    }
+    /** Radial damage to enemies, survivors and neighbouring breakables. */
+    detonate(x, y, dmg, r, src, sfx, opt) {
+      opt = opt || {};
+      if ((this._detDepth || 0) > 12) return;           // chain guard
+      this._detDepth = (this._detDepth || 0) + 1;
+      this.pushFx('explode', { x, y, r, kind: sfx === 'boom' ? 'boom' : 'fire' });
+      this.shake = Math.min(22, this.shake + r * 0.06);
+      for (const e of this.enemies) {
+        if (e.dead) continue;
+        const d2 = dist2(e.x, e.y, x, y);
+        if (d2 > r * r) continue;
+        const f = 1 - Math.sqrt(d2) / r;
+        this.damageEnemy(e, dmg * (0.45 + 0.55 * f), src, true);
+      }
+      for (const sv of this.survivors) {
+        if (sv.dead) continue;
+        const d2 = dist2(sv.x, sv.y, x, y);
+        if (d2 > r * r) continue;
+        const f = 1 - Math.sqrt(d2) / r;
+        // you catch less of your own blast, but never none: don't hug barrels
+        this.damageSurvivor(sv, dmg * (0.32 + 0.42 * f) * (src === sv ? 0.4 : 1), src, 'boom');
+      }
+      this.damageBreaksIn(x, y, r * 0.92, dmg * 0.7, src);
+      if (opt.burn) this.addHazard({ x, y, r: r * 0.6, dmg: opt.burn * 1.6, life: opt.burn, kind: 'fire', friendly: true });
+      this._detDepth--;
+    }
+    damageBreaksIn(x, y, r, dmg, src) {
+      for (const b of this.breaks) {
+        if (b.dead) continue;
+        if (dist2(b.x, b.y, x, y) > r * r) continue;
+        this.damageBreak(b, dmg, src);
+      }
+    }
+
+    /* =============== INVENTORY =============== */
+    swapWeapon(s) {
+      s.swapCd = 0.3;
+      if (!s.alt) { this.pushFx('deny', { x: s.x, y: s.y, id: s.id }); return; }
+      const a = s.alt;
+      s.alt = { id: s.wpn, mag: s.mag, res: s.reserve, maxRes: s.maxReserve };
+      s.wpn = a.id; s.mag = a.mag; s.reserve = a.res; s.maxReserve = a.maxRes;
+      s.reloading = 0; s.burstLeft = 0; s.burstCd = 0; s.fireCd = Math.max(s.fireCd, 0.18);
+      this.pushFx('swap', { x: s.x, y: s.y, id: s.id, w: s.wpn });
+    }
+    throwItem(s) {
+      if (!s.thrKind || s.thrN <= 0) { s.throwCd = 0.25; this.pushFx('deny', { x: s.x, y: s.y, id: s.id }); return; }
+      const kind = s.thrKind, t = THR[kind];
+      s.throwCd = 0.55;
+      if (--s.thrN <= 0) s.thrKind = null;
+      this.proj.push({
+        kind, thrown: true, x: s.x, y: s.y, z: 14,
+        vx: Math.cos(s.aim) * 430, vy: Math.sin(s.aim) * 430, vz: 165,
+        life: t.fuse, owner: s, r: 7
+      });
+      this.pushFx('throw', { x: s.x, y: s.y, a: s.aim, id: s.id, k: t.icon });
+    }
+    pickupSlotted(s, it) {
+      const info = D.lootInfo(it.kind);
+      s.lootCd = 0.4;
+      const ammoMul = (SUR[s.hero] && SUR[s.hero].stats.ammoMul) || 1;
+      if (info.slot === 'weapon') {
+        const id = it.kind.slice(2), w = WEP[id];
+        if (!w) return;
+        if (s.wpn === id && !s.alt) {
+          // already carrying this gun: take it as spare ammo instead
+          const add = Math.round(w.mag * 1.5);
+          if (s.reserve >= s.maxReserve) { s.lootCd = 0.25; this.pushFx('deny', { x: s.x, y: s.y, id: s.id }); return; }
+          s.reserve = Math.min(s.maxReserve, s.reserve + add);
+          it.taken = true;
+          this.pushFx('pickup', { x: s.x, y: s.y, kind: 'ammo', id: s.id, txt: '+' + add });
+          return;
+        }
+        if (s.alt) this.dropSlotted(s, 'w:' + s.alt.id);
+        s.alt = { id, mag: w.mag, res: Math.round(w.reserve * ammoMul), maxRes: Math.round(w.reserve * ammoMul) };
+        it.taken = true;
+        this.score += 40;
+        this.pushFx('pickup', { x: s.x, y: s.y, kind: 'weapon', id: s.id, txt: w.name.toUpperCase() });
+      } else if (info.slot === 'throw') {
+        const id = it.kind.slice(2), t = THR[id];
+        if (!t) return;
+        if (s.thrKind === id) {
+          if (s.thrN >= t.max) { this.pushFx('deny', { x: s.x, y: s.y, id: s.id }); return; }  // stack full: leave it
+          s.thrN++;
+        } else {
+          if (s.thrKind && s.thrN > 0) this.dropSlotted(s, 't:' + s.thrKind);
+          s.thrKind = id; s.thrN = 1;
+        }
+        it.taken = true;
+        this.score += 30;
+        this.pushFx('pickup', { x: s.x, y: s.y, kind: 'throw', id: s.id, txt: t.name.toUpperCase() + (s.thrN > 1 ? ' x' + s.thrN : '') });
+      } else if (info.slot === 'equip') {
+        const max = (EQP.armor && EQP.armor.max) || 100;
+        if (s.armor >= max) { this.pushFx('deny', { x: s.x, y: s.y, id: s.id }); return; }
+        s.armor = max; s.armorMax = max;
+        it.taken = true;
+        this.score += 35;
+        this.pushFx('pickup', { x: s.x, y: s.y, kind: 'armor', id: s.id, txt: 'KEVLAR ' + max });
+      }
+    }
+    dropSlotted(s, kind) {
+      const a = s.aim + Math.PI + (this.rnd() - .5) * 0.9;
+      this.spawnItem(s.x + Math.cos(a) * 28, s.y + Math.sin(a) * 28, kind);
+    }
+
+    /* =============== CROSS-STAGE CARRY ===============
+       Act 1 keeps everything you are holding when the next stage loads. */
+    exportCarry() {
+      const out = {};
+      for (const s of this.survivors) {
+        out[s.hero] = {
+          wpn: s.wpn, mag: s.mag, res: s.reserve, maxRes: s.maxReserve,
+          alt: s.alt ? { id: s.alt.id, mag: s.alt.mag, res: s.alt.res, maxRes: s.alt.maxRes } : null,
+          thrKind: s.thrKind, thrN: s.thrN, armor: s.armor, armorMax: s.armorMax,
+          hp: Math.max(1, Math.round(s.hp)), maxHp: s.maxHp
+        };
+      }
+      return out;
+    }
+    importCarry(carry) {
+      if (!carry) return;
+      for (const s of this.survivors) {
+        const c = carry[s.hero];
+        if (!c) continue;
+        if (WEP[c.wpn]) { s.wpn = c.wpn; s.mag = c.mag; s.reserve = c.res; s.maxReserve = c.maxRes; }
+        if (c.alt && WEP[c.alt.id]) s.alt = { id: c.alt.id, mag: c.alt.mag, res: c.alt.res, maxRes: c.alt.maxRes };
+        if (c.thrKind && THR[c.thrKind]) { s.thrKind = c.thrKind; s.thrN = Math.min(c.thrN, THR[c.thrKind].max); }
+        if (c.armorMax > 0) { s.armorMax = c.armorMax; s.armor = Math.min(c.armor, c.armorMax); }
+        if (c.hp > 0) s.hp = Math.min(s.maxHp, c.hp);
       }
     }
 
@@ -1581,7 +1817,9 @@
           pn: s.pin > 0 ? +s.pin.toFixed(2) : 0, mv: +(s.moving || 0).toFixed(2), wk: +s.walk.toFixed(2),
           ht: s.hurtT > 0 ? 1 : 0, mz: s.muzzle > 0 ? 1 : 0, k: s.kills, sp: s.sprint ? 1 : 0,
           it: s.interactTarget || null, ip: +((s.interact) || 0).toFixed(2), ml: s.meleeCd > 0 ? +s.meleeCd.toFixed(2) : 0, bn: s.burning > 0 ? 1 : 0, ifr: s.iframe > 0 ? 1 : 0,
-          adb: s.abData ? { x: Math.round(s.abData.x), y: Math.round(s.abData.y), r: s.abData.r } : null
+          adb: s.abData ? { x: Math.round(s.abData.x), y: Math.round(s.abData.y), r: s.abData.r } : null,
+          wp: s.wpn, w2: s.alt ? s.alt.id : null, m2: s.alt ? s.alt.mag : 0, r2: s.alt ? s.alt.res : 0,
+          th: s.thrKind, tn: s.thrN, ar: Math.round(s.armor), arm: s.armorMax
         })),
         en: this.enemies.filter(e => !e.dead).map(e => ({
           i: e.id, t: e.type, x: Math.round(e.x), y: Math.round(e.y), z: Math.round(e.z || 0),
@@ -1592,7 +1830,8 @@
         tr: this.tracers.map(t => ({ x: Math.round(t.x), y: Math.round(t.y), x2: Math.round(t.x2), y2: Math.round(t.y2), l: +(t.life / t.max).toFixed(2), w: t.w })),
         pr: this.proj.map(p => ({ k: p.kind, x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z || 0) })),
         hz: this.hazards.map(h => ({ k: h.kind, x: Math.round(h.x), y: Math.round(h.y), r: Math.round(h.r), l: +h.life.toFixed(1) })),
-        it: this.items.map(i => ({ k: i.kind, x: Math.round(i.x), y: Math.round(i.y), b: +i.bob.toFixed(2) })),
+        it: this.items.map(i => ({ k: i.kind, x: Math.round(i.x), y: Math.round(i.y), b: +i.bob.toFixed(2), s: D.lootInfo(i.kind).slot === 'use' ? 0 : 1 })),
+        bk: this.breaks.filter(b => b.dead || b.hp < b.maxHp).map(b => ({ n: b.n, h: b.dead ? -1 : Math.round(b.hp / b.maxHp * 100) })),
         cp: this.corpses.slice(-60).map(c => ({ t: c.type, h: c.hero, x: Math.round(c.x), y: Math.round(c.y), a: +c.a.toFixed(2) })),
         cam: { x: Math.round(this.cam.x), y: Math.round(this.cam.y), z: +this.cam.zoom.toFixed(3), sh: +this.shake.toFixed(2) },
         obj: f ? {
