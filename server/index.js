@@ -208,7 +208,7 @@ class Room {
     if (this.state !== 'playing' || !this.sim) return;
     this.acc += Math.min(dtReal, 0.25);
     const inputs = {};
-    for (const p of this.players) if (p.input) inputs[p.pid] = p.input;
+    for (const p of this.players) if (p.input) { inputs[p.pid] = p.input; if (p.input.seq) p.lastSeq = p.input.seq; }
     let guard = 0;
     while (this.acc >= TICK && guard++ < 6) {
       this.sim.update(TICK, inputs);
@@ -222,9 +222,14 @@ class Room {
       const snap = this.sim.snapshot();
       for (const p of this.players) {
         snap.you = p.pid;
+        // phase 2: tell this client which of its inputs we have already simulated,
+        // so it can replay only the un-acknowledged ones on top of this position
+        const mySv = snap.surv.find(sv => sv.id === p.pid);
+        if (mySv) mySv.isq = p.lastSeq || 0;
         snap.fxp = (p._fx || []).slice(0, 90);
         p._fx = [];
         if (p.ws.readyState === 1) p.ws.send(JSON.stringify({ t: 'snap', s: snap }));
+        if (mySv) delete mySv.isq;
       }
       if (this.sim.phase === 'victory' || this.sim.phase === 'defeat') {
         this.state = 'ended';
@@ -253,7 +258,7 @@ wss.on('connection', (ws, req) => {
   const conn = {
     ws, pid: 'p' + (pidSeq++), token: 'tok_' + Math.random().toString(36).slice(2, 12),
     profile: { name: 'Survivor' + (pidSeq), guest: true },
-    room: null, input: null, hero: null, ready: false, rtt: 0, lastPing: Date.now(), _fx: []
+    room: null, input: null, hero: null, ready: false, rtt: 0, lastPing: Date.now(), lastSeq: 0, _fx: []
   };
   ws.send(JSON.stringify({ t: 'welcome', id: conn.pid, token: conn.token, v: DATA.VERSION, stages: DATA.STAGES.map(s => ({ id: s.id, name: s.name, theme: s.theme, obj: s.objective })), acts: DATA.ACTS, heroes: DATA.SURVIVORS, diffs: DATA.DIFFICULTIES, rooms: roomList() }));
 

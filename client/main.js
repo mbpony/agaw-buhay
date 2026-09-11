@@ -26,6 +26,8 @@
     screen: 'title', mode: null, ws: null, net: 'offline', room: null, you: null, hero: null,
     lobby: null, rooms: [], stage: null, level: null, sim: null, localRun: null,
     ping: 0, pingT: 0, lastSnap: null, ended: false, chatOpen: false, paused: false,
+    // phase 2 client-side prediction: un-acked input samples + predicted own state
+    iseq: 0, pend: [], curSample: null, pred: null, predOff: null, predSpeed: 0,
     reconnecting: false, rejoinCode: null,
     yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
@@ -334,9 +336,37 @@
   }
 
   /* ================= SNAPSHOT ================= */
+  const clampN = (v, m) => v > m ? m : v < -m ? -m : v;
+
+  /* Phase 2 netcode: fold the authoritative position back into the prediction.
+     Inputs the server had not confirmed yet (seq > sv.isq) are replayed on top of
+     it; whatever error is left becomes a decaying offset so the view glides
+     instead of popping. Big errors (knockback, teleports) snap immediately. */
+  function reconcile(s) {
+    const PK = window.ABAW_PREDICT;
+    if (!PK || !app.pred || !renderer.level || !s.surv) return;
+    const me = s.surv.find(x => x.id === app.you);
+    if (!me || me.dd) return;
+    const hero = D.SURVIVORS[me.hero];
+    if (hero && hero.stats) app.predSpeed = hero.stats.speed;
+    const isq = me.isq || 0;
+    while (app.pend.length && app.pend[0].seq <= isq) app.pend.shift();
+    const list = app.pend.slice();
+    if (app.curSample && app.curSample.hold > 0) list.push(app.curSample);
+    const rep = PK.replay(LV, renderer.level, me, list, app.predSpeed);
+    const err = Math.hypot(app.pred.x - rep.x, app.pred.y - rep.y);
+    if (err > 56) { app.pred = rep; app.predOff.x = 0; app.predOff.y = 0; }
+    else {
+      app.predOff.x = clampN(app.predOff.x + (app.pred.x - rep.x), 40);
+      app.predOff.y = clampN(app.predOff.y + (app.pred.y - rep.y), 40);
+      app.pred = rep;
+    }
+  }
+
   function onSnapshot(s) {
     app.lastSnap = s;
     renderer.push(s, false);
+    reconcile(s);
     if (s.you) { app.you = s.you; renderer.youId = s.you; }
     if (s.phase === 'victory' || s.phase === 'defeat') { /* server sends 'end' */ }
   }
@@ -967,6 +997,8 @@
     if (app.mode === 'net') { send({ t: 'leave' }); app.room = null; app.mode = null; show('title'); }
     else { app.sim = null; app.mode = null; show('title'); }
     app.lastSnap = null;
+    app.pred = null; app.predOff = null; app.pend.length = 0; app.curSample = null; app.iseq = 0;
+    renderer.predOwn = null;
     renderer.buf.length = 0;
   }
 
@@ -1012,10 +1044,40 @@
           }
         }
       } else if (app.mode === 'net') {
+        // ---- phase 2: integrate our own movement on THIS frame so the first-person
+        // view never waits for a 24 Hz snapshot; reconcile() keeps it honest ----
+        const PK = window.ABAW_PREDICT;
+        if (PK && renderer.level && !app.pred && app.lastSnap && app.lastSnap.surv) {
+          const m0 = app.lastSnap.surv.find(x => x.id === app.you);
+          if (m0 && !m0.dd) {
+            app.pred = { x: m0.x, y: m0.y, vx: 0, vy: 0 };
+            app.predOff = { x: 0, y: 0 };
+            const h = D.SURVIVORS[m0.hero];
+            app.predSpeed = h && h.stats ? h.stats.speed : 120;
+          }
+        }
+        if (app.pred) {
+          if (!app.paused) {
+            if (!app.curSample) app.curSample = { mx: inp.mx, my: inp.my, sprint: inp.sprint, hold: 0, seq: 0 };
+            else { app.curSample.mx = inp.mx; app.curSample.my = inp.my; app.curSample.sprint = inp.sprint; }
+            app.curSample.hold += dt;
+            PK.step(LV, renderer.level, app.pred, inp, app.predSpeed, dt);
+          }
+          const k = Math.exp(-12 * dt);
+          app.predOff.x *= k; app.predOff.y *= k;
+          renderer.predOwn = { x: app.pred.x + app.predOff.x, y: app.pred.y + app.predOff.y };
+        }
         netAcc += dt;
         if (netAcc > 1 / 30) {
           netAcc = 0;
-          send({ t: 'input', i: app.paused ? null : { mx: +inp.mx.toFixed(2), my: +inp.my.toFixed(2), aimx: +inp.aimx.toFixed(2), aimy: +inp.aimy.toFixed(2), fire: inp.fire, sprint: inp.sprint, reload: !!inp.reload, ability: inp.ability, interact: inp.interact, melee: !!inp.melee, swap: !!inp.swap, throw: !!inp.throw } });
+          // seal the held sample with a sequence number, then start a fresh one
+          if (app.curSample) {
+            app.curSample.seq = ++app.iseq;
+            app.pend.push(app.curSample);
+            if (app.pend.length > 120) app.pend.shift();
+            app.curSample = null;
+          }
+          send({ t: 'input', i: app.paused ? null : { seq: app.iseq, mx: +inp.mx.toFixed(2), my: +inp.my.toFixed(2), aimx: +inp.aimx.toFixed(2), aimy: +inp.aimy.toFixed(2), fire: inp.fire, sprint: inp.sprint, reload: !!inp.reload, ability: inp.ability, interact: inp.interact, melee: !!inp.melee, swap: !!inp.swap, throw: !!inp.throw } });
           inp.reload = false; inp.melee = false; inp.swapLatch = false; inp.throwLatch = false;
         }
         pingAcc += dt;

@@ -388,15 +388,13 @@
         en: this.mixList(s.a.en, snap.en, s.t, 'i'),
         tr: snap.tr, pr: snap.pr, hz: snap.hz, it: snap.it, cp: snap.cp
       };
-      // lightweight client-side prediction for the local survivor (hides net delay)
-      if (!this.localMode && this.youId && this.predInput) {
+      // phase 2: the local survivor is drawn at the CLIENT-PREDICTED position.
+      // main.js integrates our movement every frame and reconcile() folds each
+      // 24 Hz snapshot back in, so the view (and the FP raycast origin) reacts
+      // on the input frame instead of a round trip later.
+      if (!this.localMode && this.youId && this.predOwn) {
         const me = ents.surv.find(e => e.id === this.youId);
-        if (me && !me.dd && !me.dn && !me.pn) {
-          const hero = D.SURVIVORS[me.hero];
-          const sp = hero.stats.speed * (this.predInput.sprint ? 1.42 : 1) * 0.085;
-          const nx = me.x + (this.predInput.mx || 0) * sp, ny = me.y + (this.predInput.my || 0) * sp;
-          if (!LV.isSolid(this.level, nx, ny)) { me.x = nx; me.y = ny; }
-        }
+        if (me && !me.dd) { me.x = this.predOwn.x; me.y = this.predOwn.y; }
       }
       if (snap.bk && this.breakByN) {
         for (const d of snap.bk) {
@@ -448,6 +446,11 @@
       this.cam.y = lerp(this.cam.y, ty, ease);
       this.cam.zoom = lerp(this.cam.zoom, tz, Math.min(1, dt * 6));
       this.shake = this.opts.shake ? c.sh : 0;
+
+      // FP and top-down both publish the view rect (tests + culling rely on it)
+      const zv = this.cam.zoom * (this.w < 700 ? 0.82 : 1);
+      this.viewW = this.w / zv; this.viewH = this.h / zv;
+      this.view = { x0: this.cam.x - this.viewW / 2 - 80, y0: this.cam.y - this.viewH / 2 - 120, x1: this.cam.x + this.viewW / 2 + 80, y1: this.cam.y + this.viewH / 2 + 140 };
 
       const ctx = this.ctx;
       if (this.fp) { this.drawFirstPerson(ctx, ents, dt, snap); return; }

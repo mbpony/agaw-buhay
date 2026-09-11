@@ -159,6 +159,24 @@ class Client {
   ok(moved > 20, 'input moves the survivor on the server (' + moved.toFixed(0) + 'px)', moved.toFixed(0));
   ok(A.snaps.some(s => s.fx && s.fx.length) || A.snaps.some(s => s.fxp && s.fxp.length), 'fx events reach the client');
 
+  console.log('\n== Phase 2: input seq echo (reconcile fuel) ==');
+  const seq0 = 4242;
+  A.send({ t: 'input', i: { seq: seq0, mx: 0, my: 0 } });
+  let isqSeen = null, otherIsq = 'n/a';
+  for (let i = 0; i < 60 && isqSeen === null; i++) {
+    await sleep(50);
+    const s = A.snaps[A.snaps.length - 1];
+    if (!s || !s.surv) continue;
+    const me = s.surv.find(x => x.id === s.you);
+    if (me && typeof me.isq === 'number' && me.isq !== 0) {
+      isqSeen = me.isq;
+      const other = s.surv.find(x => x.id !== s.you);
+      otherIsq = other ? String(other.isq) : 'none';
+    }
+  }
+  ok(isqSeen === seq0, 'snapshot echoes the last simulated input seq as isq (' + isqSeen + ')', String(isqSeen));
+  ok(otherIsq === 'undefined' || otherIsq === 'none', 'isq is stamped only on the receiver\'s own survivor (' + otherIsq + ')', otherIsq);
+
   console.log('\n== Late join (mid-match) ==');
   const C = new Client('late');
   await C.ready;
