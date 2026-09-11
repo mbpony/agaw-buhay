@@ -32,7 +32,11 @@
     reconnecting: false, rejoinCode: null,
     yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
-  const renderer = new Renderer($('game'));
+  // 3D presentation layer (master doc): real Three.js scene when WebGL exists;
+  // the raycast renderer stays as the no-WebGL / ?r2d debug fallback.
+  const renderer = (window.ABAW_R3D && window.ABAW_R3D.webglAvailable() && !/[?&]r2d\b/.test(location.search))
+    ? new window.ABAW_R3D.Renderer3D($('game'))
+    : new Renderer($('game'));
   // FP audio: sounds pan by bearing relative to your view, not screen space
   AU.setListener(() => (renderer.fp && renderer.ownPos) ? { fp: true, x: renderer.ownPos.x, y: renderer.ownPos.y, yaw: renderer.yaw } : null);
   renderer.opts.shake = settings.shake; renderer.opts.dmg = settings.dmg; renderer.opts.fps = settings.fps;

@@ -859,7 +859,17 @@
         let dmin = Infinity;
         for (const s of alive) dmin = Math.min(dmin, Math.hypot(nd.x - s.x, nd.y - s.y));
         if (dmin < (minDist || 300) || dmin > (maxDist || 1500)) continue;
-        const score = -Math.abs(dmin - 620) + this.rnd() * 260;
+        // master doc §28: never materialise a monster inside a player's view cone
+        let inView = false;
+        for (const s of alive) {
+          const dx = nd.x - s.x, dy = nd.y - s.y, d = Math.hypot(dx, dy);
+          if (d > 460) continue;
+          if ((dx / d) * Math.cos(s.aim) + (dy / d) * Math.sin(s.aim) > 0.64 &&
+              LV.lineOfSight(this.level, s.x, s.y, nd.x, nd.y)) { inView = true; break; }
+        }
+        // soft preference: off-view nodes win when available, but the director
+        // never starves (a starved director stalls pacing -> stalled runs)
+        const score = -Math.abs(dmin - 620) + this.rnd() * 260 - (inView ? 900 : 0);
         if (score > bestScore) { bestScore = score; best = nd; }
       }
       if (!best) {

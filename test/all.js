@@ -33,6 +33,7 @@ function run(label, file, args, port) {
   results.push(['sim balance matrix', run('SIM BALANCE', 'balance.js')]);
   results.push(['prediction mirror + replay', run('PREDICTION MIRROR + REPLAY', 'predict.js')]);
   results.push(['fp awareness (pan + markers)', run('FP AWARENESS', 'aware.js')]);
+  results.push(['3d presentation layer', run('3D PRESENTATION', 'r3d.js')]);
 
   // find a free port so a leftover dev server can never be mistaken for ours
   let PORT = BASE_PORT;

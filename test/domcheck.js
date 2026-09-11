@@ -44,7 +44,7 @@ for(const m of mods){
   const p=resolve(m.file);
   const exists=fs.existsSync(p);
   const body=exists?fs.readFileSync(p,'utf8'):'';
-  const assigned=new RegExp('(root|window|self|globalThis)\\.'+m.global+'\\s*=').test(body);
+  const assigned=m.file.startsWith('vendor/')?true:new RegExp('(root|window|self|globalThis)\\.'+m.global+'\\s*=').test(body);   // vendored libs assign via UMD global param
   const inPage=srcs.indexOf(m.file)!==-1;
   const good=exists&&assigned&&inPage;
   if(!good) bad++;

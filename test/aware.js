@@ -10,6 +10,7 @@ global.self = global;                       // UMD roots (same trick as fp-previ
 global.ABAW_DATA = require('../core/data.js');
 global.ABAW_LEVEL = require('../core/level.js');
 const { Sim } = require('../core/sim.js');
+const LV = global.ABAW_LEVEL;
 require('../client/audio.js');              // publishes self.ABAW_AUDIO (no WebAudio needed for spatial)
 const AU = self.ABAW_AUDIO;
 require('../client/render.js');             // reads ABAW_DATA/LEVEL/AUDIO off root at load
@@ -84,6 +85,23 @@ console.log('\n== Off-view threat marker geometry ==');
     if (p.px < m - 0.01 || p.px > W - m + 0.01 || p.py < m - 0.01 || p.py > H - m + 0.01) inside = false;
   }
   ok(inside, 'every bearing lands on the border margin, never off-screen');
+}
+
+console.log('\n== Director spawn stealth (master doc §28) ==');
+{
+  const sim = new Sim({ stage: D.stageById('1-1'), difficulty: 'normal', seed: 991 });
+  ['berto', 'rhea', 'junjun', 'sarge'].forEach((h, i) =>
+    sim.addSurvivor({ id: i === 0 ? 'p1' : 'b' + i, name: h, hero: h, isBot: i !== 0 }));
+  const s0 = sim.survivors[0];
+  s0.x = sim.level.spawn.x; s0.y = sim.level.spawn.y; s0.aim = 0;   // staring down +x
+  let front = 0, n = 0;
+  for (let i = 0; i < 60; i++) {
+    const nd = sim.pickNode(300, 1500);
+    n++;
+    const dx = nd.x - s0.x, dy = nd.y - s0.y, d = Math.hypot(dx, dy);
+    if (d < 460 && dx / d > 0.64 && LV.lineOfSight(sim.level, s0.x, s0.y, nd.x, nd.y)) front++;
+  }
+  ok(front === 0, 'no spawn node lands inside a staring player\'s view cone (' + n + ' picks)', front + ' in view');
 }
 
 console.log('\n== Compass heading math ==');

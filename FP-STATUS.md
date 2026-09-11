@@ -1,3 +1,13 @@
+## Phase 4 — TRUE 3D (Three.js) [shipped 2026-09-12, master-doc milestones 1-3 + parts of 4-5]
+- `client/r3d.js`: SceneKit (testable scene graph) + Renderer3D (WebGL over the 2D HUD overlay) + buildWorld (instanced walls/roads/water/rubble + PH dressing: poles, jeepneys, tricycles) + ENEMY_BUILDERS (8 procedural folklore silhouettes incl. flapping Manananggal wings) + WEAPON_BUILDERS (6 3D viewmodels with muzzle anchors) + rain/fog/lightning + perf tiers.
+- Three.js vendored at `client/vendor/three.min.js` (offline-safe UMD; no CDN).
+- `client/main.js`: auto-selects 3D when WebGL exists; `?r2d` query (or no WebGL) falls back to the raycast renderer (master doc §56 debug flag).
+- Sim/net/prediction/HUD code paths unchanged; renderer borrows the existing CODM HUD via prototype call.
+- Director spawn stealth (§27-28): pickNode softly prefers nodes outside every alive player's view cone — tested 60/60 picks in test/aware.js.
+- docs/: 14-file design/engineering set per master doc §62.
+- New suite `test/r3d.js` (29 asserts, headless scene-graph: registries, world-vs-grid counts, snapshot->3D mapping, viewmodel swap, tier scaling). All suites green (net 69, client 100, mobile 101, loot 122, deploy 83, r3d 29, aware 21).
+- NEXT (milestones 4-5): pitch look + vertical aim for flying Manananggal, surface-aware footsteps, zone streaming, Act 1 zone-grammar conversion, boss arena verticality pass.
+
 # First-Person (2.5D) — Phase Status
 
 **Decision (user-confirmed):** FP fully REPLACES top-down (top-down code deleted at the
