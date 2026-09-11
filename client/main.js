@@ -53,7 +53,7 @@
     if (name === 'game' && touch.on) maybeIosHint();
     app.screen = name;
     if (name === 'game') goFullscreen();
-    if (name !== 'game') { touch.fire = false; touch.use = false; touch.move.id = null; touch.aim.id = null; touch.move.x = touch.move.y = touch.aim.x = touch.aim.y = 0; }
+    if (name !== 'game') { touch.fire = false; touch.use = false; touch.move.id = null; touch.aim.id = null; touch.move.x = touch.move.y = touch.aim.x = touch.aim.y = 0; app.runStartAt = 0; }
   }
   function loading(on, title, sub) {
     $('sc-load').classList.toggle('hidden', !on);
@@ -1074,6 +1074,26 @@
 
   /* ================= MAIN LOOP ================= */
   let last = performance.now(), netAcc = 0, pingAcc = 0;
+  /* Last-resort presentation fallback: if the 3D renderer misbehaves on a real
+     GPU (throwing draw, or silently completing zero frames), swap to the
+     battle-tested raycast renderer MID-RUN instead of showing a black screen. */
+  function engageFallback(reason) {
+    const old = renderer;
+    if (!window.ABAW_R3D || !window.ABAW_RENDER || !(old instanceof ABAW_R3D.Renderer3D)) return false;
+    try {
+      if (old.glCanvas && old.glCanvas.parentNode) old.glCanvas.parentNode.removeChild(old.glCanvas);
+      if (old.gl && old.gl.dispose) old.gl.dispose();
+      const g2 = $('game'); g2.style.background = '';
+      renderer = new ABAW_RENDER.Renderer(g2);
+      renderer.opts = old.opts || renderer.opts;
+      renderer.yaw = old.yaw || 0;
+      if (old.level) renderer.setLevel(old.level);
+      app.lastDrawError = reason;
+      toast('3D renderer issue — classic view engaged', true);
+      return true;
+    } catch (e2) { console.error(e2); return false; }
+  }
+
   /* Tile under a world point -> footstep/acoustic surface name (master doc §29). */
   function surfAt(p) {
     const L = (renderer && (renderer.level || (renderer.kit && renderer.kit.level))) || app.level;
@@ -1177,22 +1197,23 @@
       } catch (err) {
         // a dead draw loop = permanent black screen; degrade instead of dying
         renderer._drawFails = (renderer._drawFails || 0) + 1;
-        app.lastDrawError = String(err && err.message || err);
-        if (renderer._drawFails === 3 && window.ABAW_R3D && window.ABAW_RENDER && renderer instanceof ABAW_R3D.Renderer3D) {
-          try {
-            const old = renderer;
-            if (old.glCanvas && old.glCanvas.parentNode) old.glCanvas.parentNode.removeChild(old.glCanvas);
-            if (old.gl && old.gl.dispose) old.gl.dispose();
-            const g2 = $('game'); g2.style.background = '';
-            renderer = new ABAW_RENDER.Renderer(g2);
-            renderer.opts = old.opts || renderer.opts;
-            renderer.yaw = old.yaw || 0;
-            if (old.level) renderer.setLevel(old.level);
-            toast('3D renderer hit an error — classic view engaged', true);
-          } catch (e2) { console.error(e2); }
-        } else if (renderer._drawFails > 90) {
-          console.error('draw failed repeatedly:', err);
-          renderer._drawFails = 0;
+        app.lastDrawError = String((err && err.message) || err);
+        if (renderer._drawFails === 1 && typeof window.box === 'function') {
+          window.box('Renderer error / may problema sa renderer',
+            app.lastDrawError + '\n\nI-screenshot ito at ipadala sa dev. (tap to dismiss)');
+        }
+        if (renderer._drawFails === 3) engageFallback('draw threw: ' + app.lastDrawError);
+        else if (renderer._drawFails > 90) { console.error('draw failed repeatedly:', err); renderer._drawFails = 0; }
+      }
+      // watchdog: 3D renderer alive but completing ZERO frames = silent black
+      if (!app.runStartAt) app.runStartAt = now;
+      if (window.ABAW_R3D && renderer instanceof ABAW_R3D.Renderer3D &&
+          (renderer._fCnt || 0) === 0 && now - app.runStartAt > 4000) {
+        if (engageFallback('3D renderer completed zero frames in 4s (silent black screen)')) {
+          if (typeof window.box === 'function') {
+            window.box('3D watchdog / lumipat sa classic view',
+              app.lastDrawError + '\n\nI-screenshot ito at ipadala sa dev. (tap to dismiss)');
+          }
         }
       }
       // own-player footsteps: stride accumulator + tile surface (client-side SFX only)
