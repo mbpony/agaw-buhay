@@ -610,6 +610,7 @@
         }
       }
     }
+    diagProbe() { return this._lastPx || null; }
     draw(now, dt) {
       if (this.contextLost) throw new Error('WebGL context lost');   // main.js falls back to raycast
       if (!this.w || !this.h) this.resize();                          // zero-size self-heal
@@ -662,6 +663,16 @@
       const sh = this.opts.shake ? (snap.cam ? snap.cam.sh : 0) : 0;
       if (sh > 0.4) this.kit.camera.position.x += (Math.random() - 0.5) * sh * 1.6, this.kit.camera.position.y += (Math.random() - 0.5) * sh * 1.2;
       this.gl.render(this.kit.scene, this.kit.camera);
+      // sample the centre pixel INSIDE the frame (preserveDrawingBuffer is off,
+      // so a readPixels outside draw would always return zeros)
+      if (this._fCnt % 60 === 0) {
+        try {
+          const glc = this.gl.getContext();
+          const px = new Uint8Array(4);
+          glc.readPixels((this.w / 2) | 0, (this.h / 2) | 0, 1, 1, glc.RGBA, glc.UNSIGNED_BYTE, px);
+          this._lastPx = [px[0], px[1], px[2], px[3]];
+        } catch (e) { this._lastPx = 'err:' + e.message; }
+      }
 
       // 2D HUD overlay reuses the raycast renderer's HUD methods
       const R2 = window.ABAW_RENDER;

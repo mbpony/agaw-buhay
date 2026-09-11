@@ -1074,6 +1074,41 @@
 
   /* ================= MAIN LOOP ================= */
   let last = performance.now(), netAcc = 0, pingAcc = 0;
+  /* Field diagnostics beacon: POST renderer/canvas state to /diag so a black
+     screen in the wild can be diagnosed without asking the player to dig into
+     devtools. Throttled to once per 5s while in game, immediate when forced. */
+  let lastDiagAt = 0;
+  function sendDiag(force) {
+    const nowMs = performance.now();
+    if (!force && nowMs - lastDiagAt < 5000) return;
+    lastDiagAt = nowMs;
+    try {
+      const r = renderer;
+      const g3 = document.getElementById('game3d');
+      const g2 = $('game');
+      let px2d = null;
+      try {
+        const cx = g2.getContext('2d');
+        const d = cx.getImageData(Math.max(1, (g2.width / 2) | 0), Math.max(1, (g2.height / 2) | 0), 1, 1).data;
+        px2d = [d[0], d[1], d[2], d[3]];
+      } catch (e) { px2d = 'err:' + e.message; }
+      const payload = {
+        ua: navigator.userAgent, url: location.href, at: Date.now(),
+        rend: (window.ABAW_R3D && r instanceof ABAW_R3D.Renderer3D) ? '3d' : 'ray',
+        w: r.w, h: r.h, fails: r._drawFails || 0, fCnt: r._fCnt || 0,
+        ctxLost: !!r.contextLost, drawErr: app.lastDrawError || null,
+        webgl: window.ABAW_R3D ? ABAW_R3D.webglAvailable() : false,
+        dpr: window.devicePixelRatio || 1, mode: app.mode, screen: app.screen,
+        g3: g3 ? [g3.width, g3.height, g3.clientWidth, g3.clientHeight] : null,
+        g2: [g2.width, g2.height, g2.clientWidth, g2.clientHeight],
+        px2d: px2d, px3d: (r.diagProbe ? r.diagProbe() : null),
+        layout: window.ABAW_HUDL ? window.ABAW_HUDL.layout : null,
+        vis: document.visibilityState
+      };
+      fetch('diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(() => {});
+    } catch (e) {}
+  }
+
   /* Last-resort presentation fallback: if the 3D renderer misbehaves on a real
      GPU (throwing draw, or silently completing zero frames), swap to the
      battle-tested raycast renderer MID-RUN instead of showing a black screen. */
@@ -1202,13 +1237,16 @@
           window.box('Renderer error / may problema sa renderer',
             app.lastDrawError + '\n\nI-screenshot ito at ipadala sa dev. (tap to dismiss)');
         }
+        sendDiag(true);
         if (renderer._drawFails === 3) engageFallback('draw threw: ' + app.lastDrawError);
         else if (renderer._drawFails > 90) { console.error('draw failed repeatedly:', err); renderer._drawFails = 0; }
       }
+      sendDiag(false);
       // watchdog: 3D renderer alive but completing ZERO frames = silent black
       if (!app.runStartAt) app.runStartAt = now;
       if (window.ABAW_R3D && renderer instanceof ABAW_R3D.Renderer3D &&
           (renderer._fCnt || 0) === 0 && now - app.runStartAt > 4000) {
+        sendDiag(true);
         if (engageFallback('3D renderer completed zero frames in 4s (silent black screen)')) {
           if (typeof window.box === 'function') {
             window.box('3D watchdog / lumipat sa classic view',

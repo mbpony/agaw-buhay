@@ -40,10 +40,27 @@ function serve(res, file, code) {
   });
 }
 
+let LAST_DIAG = null;
 const server = http.createServer((req, res) => {
   const u = (req.url || '/').split('?')[0];
   if (u === '/health') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, rooms: rooms.size, v: DATA.VERSION })); return; }
   if (u === '/api/rooms') { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ rooms: roomList() })); return; }
+  // Field diagnostics beacon: clients in the wild POST renderer state here when
+  // something looks wrong; the dev reads it back with GET /diag. In-memory only.
+  if (u === '/diag') {
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', c => { if (body.length < 8192) body += c; });
+      req.on('end', () => {
+        try { LAST_DIAG = { at: Date.now(), ip: (req.headers['x-forwarded-for'] || 'local').split(',')[0], d: JSON.parse(body) }; } catch (e) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+      });
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(LAST_DIAG || { none: true }));
+    return;
+  }
   // index.html uses RELATIVE script paths (../core/*.js, audio.js) so the folder
   // also works when opened straight off disk via file://. Serving it at "/" makes
   // a browser resolve "audio.js" to "/audio.js" -> 404, and the game then sits

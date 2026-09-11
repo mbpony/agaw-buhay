@@ -9,6 +9,14 @@ for(const m of main.matchAll(/querySelector\('#([\w-]+)'\)/g)) used.add(m[1]);
 // ids created at runtime by main.js (element injection / innerHTML strings)
 const dyn=new Set([...main.matchAll(/\.id\s*=\s*'([^']+)'/g)].map(m=>m[1]));
 for(const m of main.matchAll(/id="([^"]+)"/g)) dyn.add(m[1]);
+// other client modules inject elements at runtime too (r3d's WebGL canvas, hudlayout toolbar)
+for (const f of ['client/r3d.js', 'client/hudlayout.js']) {
+  try {
+    const src = fs.readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/\.id\s*=\s*'([^']+)'/g)) dyn.add(m[1]);
+    for (const m of src.matchAll(/id="([^"]+)"/g)) dyn.add(m[1]);
+  } catch (e) {}
+}
 const missing=[...used].filter(u=>!ids.has(u)&&!dyn.has(u));
 if(dyn.size) console.log('runtime-injected ids:', [...dyn].join(', '));
 console.log('ids in index.html :', ids.size);
