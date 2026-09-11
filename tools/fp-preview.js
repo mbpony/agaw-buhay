@@ -151,6 +151,7 @@ const self = Object.create(Rend.prototype);
 Object.assign(self, {
   w: W, h: H, dpr: 1, tier: 'high', youId: 'p0', yaw: yawDeg * Math.PI / 180,
   level: lvl, zbuf: null, fpBob: 0, fpMuzzle: 0, fpMoving: true,
+  ownPos: { x: me.x, y: me.y }, hitT: 0, hitCrit: false, spread: 6, time: 0, hurtDir: 0, hurtDirT: 0,
   cam: { x: me.x, y: me.y }, breakByN: sim.breaks, opts: {}
 });
 const ents = { surv: snap.surv, en: snap.en, it: snap.it, tr: snap.tr, pr: snap.pr, hz: snap.hz, cp: snap.cp };

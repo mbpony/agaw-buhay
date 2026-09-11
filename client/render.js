@@ -7,6 +7,7 @@
 (function (root) {
   'use strict';
   const D = root.ABAW_DATA, LV = root.ABAW_LEVEL, AU = root.ABAW_AUDIO;
+  const HUDFONT = '"Arial Narrow", "Roboto Condensed", "Barlow Condensed", "Helvetica Neue", system-ui, sans-serif';
   const T = D.TILE;
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -1142,87 +1143,159 @@
 
     /* ---------------- CoD-style canvas HUD ---------------- */
     static degFromYaw(yaw) { const d = (yaw * 180 / Math.PI + 90) % 360; return d < 0 ? d + 360 : d; }
+    /* ---------------- CODM / Warzone-style canvas HUD ---------------- */
+    drawMinimapFP(ctx, ents, u) {
+      const own = this.ownPos, L = this.level;
+      if (!own || !L) return;
+      const TS = L.tile || 32;
+      const R = 54 * u, cx = R + 13 * u, cy = R + 13 * u;
+      const scale = (R * 0.94) / (17 * TS);
+      const th = -this.yaw - Math.PI / 2;                 // forward = up
+      const c = Math.cos(th), s = Math.sin(th);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832);
+      ctx.fillStyle = 'rgba(6,9,13,.74)'; ctx.fill();
+      ctx.clip();
+      ctx.translate(cx, cy); ctx.rotate(th);
+      const h = TS * scale / 2;
+      const ox = own.x, oy = own.y, reach = 17 * TS;
+      ctx.fillStyle = 'rgba(120,132,150,.5)';
+      const t0x = Math.floor((ox - reach) / TS), t1x = Math.floor((ox + reach) / TS);
+      const t0y = Math.floor((oy - reach) / TS), t1y = Math.floor((oy + reach) / TS);
+      for (let ty = t0y; ty <= t1y; ty++) for (let tx = t0x; tx <= t1x; tx++) {
+        if (!LV.isSolid(L, tx * TS + TS / 2, ty * TS + TS / 2)) continue;
+        ctx.fillRect((tx * TS + TS / 2 - ox) * scale - h, (ty * TS + TS / 2 - oy) * scale - h, h * 2, h * 2);
+      }
+      const dot = (wx, wy, r, colr) => { ctx.fillStyle = colr; ctx.beginPath(); ctx.arc((wx - ox) * scale, (wy - oy) * scale, r, 0, 6.2832); ctx.fill(); };
+      for (const it of (ents.it || [])) if (Math.hypot(it.x - ox, it.y - oy) < reach) dot(it.x, it.y, 1.6 * u, '#ffb02e');
+      if (L.extract) {
+        const ex = (L.extract.x - ox) * scale, ey = (L.extract.y - oy) * scale;
+        const d = Math.hypot(ex, ey), k = d > R * 0.9 ? (R * 0.9) / d : 1;
+        ctx.fillStyle = '#4ade80';
+        ctx.save(); ctx.translate(ex * k, ey * k); ctx.rotate(Math.PI / 4); ctx.fillRect(-2.4 * u, -2.4 * u, 4.8 * u, 4.8 * u); ctx.restore();
+      }
+      for (const sv of (ents.surv || [])) if (sv.id !== this.youId && !sv.dd) dot(sv.x, sv.y, 2.6 * u, '#5ad1ff');
+      for (const e of (ents.en || [])) if (Math.hypot(e.x - ox, e.y - oy) < reach) dot(e.x, e.y, e.boss ? 3.6 * u : 2.4 * u, e.boss ? '#ff2d55' : '#ff3b30');
+      ctx.restore();
+      // ring + rotating compass letters
+      ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1.5 * u;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 1 * u;
+      for (let d = 0; d < 360; d += 45) {
+        const wa = (d - 90) * Math.PI / 180;              // world angle of compass deg d (N=-y)
+        const ra = wa + th;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ra) * (R - 3 * u), cy + Math.sin(ra) * (R - 3 * u));
+        ctx.lineTo(cx + Math.cos(ra) * R, cy + Math.sin(ra) * R);
+        ctx.stroke();
+      }
+      const CARD = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
+      ctx.font = '700 ' + (8 * u) + 'px ' + HUDFONT;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const d of [0, 90, 180, 270]) {
+        const ra = (d - 90) * Math.PI / 180 + th;
+        ctx.fillStyle = d === 0 ? '#ffd24a' : 'rgba(255,255,255,.8)';
+        ctx.fillText(CARD[d], cx + Math.cos(ra) * (R + 6.5 * u), cy + Math.sin(ra) * (R + 6.5 * u));
+      }
+      ctx.textBaseline = 'alphabetic';
+      // own arrow + view cone
+      ctx.fillStyle = 'rgba(255,255,255,.14)';
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R * 0.85, -Math.PI / 2 - 0.52, -Math.PI / 2 + 0.52); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.moveTo(cx, cy - 5.5 * u); ctx.lineTo(cx - 3.6 * u, cy + 4.5 * u); ctx.lineTo(cx + 3.6 * u, cy + 4.5 * u); ctx.closePath(); ctx.fill();
+    }
+
     drawHud(ctx, ents, snap, dt) {
       const W = this.w, H = this.h, u = H / 360;
       const me = this.youId ? ents.surv.find(e => e.id === this.youId) : null;
       if (this.hitT > 0) this.hitT -= dt;
-      // crosshair: spreads with movement + recoil
-      const tgt = 5 + (this.fpMoving ? 6 : 0) + (this.fpMuzzle > 0 ? 7 : 0) + ((me && me.sp) ? 3 : 0);
-      this.spread += (tgt - this.spread) * Math.min(1, dt * 14);
-      const g = this.spread * u, L = 7 * u;
-      ctx.strokeStyle = 'rgba(245,245,245,.92)'; ctx.lineWidth = Math.max(1.4, 1.6 * u);
-      ctx.beginPath();
-      ctx.moveTo(W / 2 - g - L, H / 2); ctx.lineTo(W / 2 - g, H / 2);
-      ctx.moveTo(W / 2 + g, H / 2); ctx.lineTo(W / 2 + g + L, H / 2);
-      ctx.moveTo(W / 2, H / 2 - g - L); ctx.lineTo(W / 2, H / 2 - g);
-      ctx.moveTo(W / 2, H / 2 + g); ctx.lineTo(W / 2, H / 2 + g + L);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(245,245,245,.9)'; ctx.fillRect(W / 2 - u, H / 2 - u, 2 * u, 2 * u);
-      // hitmarker
-      if (this.hitT > 0) {
-        const a = clamp(this.hitT / 0.14, 0, 1), r1 = 6 * u, r2 = 13 * u;
-        ctx.strokeStyle = this.hitCrit ? 'rgba(255,80,60,' + a.toFixed(2) + ')' : 'rgba(255,255,255,' + a.toFixed(2) + ')';
-        ctx.lineWidth = 2.2 * u;
-        ctx.beginPath();
-        ctx.moveTo(W / 2 + r1, H / 2 + r1); ctx.lineTo(W / 2 + r2, H / 2 + r2);
-        ctx.moveTo(W / 2 + r1, H / 2 - r1); ctx.lineTo(W / 2 + r2, H / 2 - r2);
-        ctx.moveTo(W / 2 - r1, H / 2 + r1); ctx.lineTo(W / 2 - r2, H / 2 + r2);
-        ctx.moveTo(W / 2 - r1, H / 2 - r1); ctx.lineTo(W / 2 - r2, H / 2 - r2);
-        ctx.stroke();
-      }
-      // compass tape
-      const TS = (this.level && this.level.tile) || 32;
+      const txt = (str, x, y, size, colr, align, weight) => {
+        ctx.font = (weight || 700) + ' ' + (size * u) + 'px ' + HUDFONT;
+        ctx.textAlign = align || 'left';
+        ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillText(str, x + 1.2 * u, y + 1.2 * u);
+        ctx.fillStyle = colr; ctx.fillText(str, x, y);
+      };
+      this.drawMinimapFP(ctx, ents, u);
+
+      // ---- thin compass strip (Warzone) ----
       const deg = Renderer.degFromYaw(this.yaw);
-      const cw = Math.min(W * 0.52, 560 * u), ch = 20 * u, cx0 = W / 2, cy0 = 16 * u, pxd = cw / 100;
+      const cw = Math.min(W * 0.40, 430 * u), ch = 13 * u, cx0 = W / 2, cy0 = 9 * u + ch / 2, pxd = cw / 90;
       ctx.save();
       ctx.beginPath(); ctx.rect(cx0 - cw / 2, cy0 - ch / 2, cw, ch); ctx.clip();
-      ctx.fillStyle = 'rgba(8,10,14,.5)'; ctx.fillRect(cx0 - cw / 2, cy0 - ch / 2, cw, ch);
+      const grd = ctx.createLinearGradient(cx0 - cw / 2, 0, cx0 + cw / 2, 0);
+      grd.addColorStop(0, 'rgba(6,9,13,0)'); grd.addColorStop(0.18, 'rgba(6,9,13,.62)');
+      grd.addColorStop(0.82, 'rgba(6,9,13,.62)'); grd.addColorStop(1, 'rgba(6,9,13,0)');
+      ctx.fillStyle = grd; ctx.fillRect(cx0 - cw / 2, cy0 - ch / 2, cw, ch);
       const CARDS = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
-      for (let d = Math.floor((deg - 55) / 15) * 15; d <= deg + 55; d += 15) {
+      for (let d = Math.floor((deg - 45) / 15) * 15; d <= deg + 45; d += 15) {
         const x = cx0 + (d - deg) * pxd, dd = ((d % 360) + 360) % 360;
-        if (CARDS[dd] !== undefined) {
-          ctx.fillStyle = dd === 0 ? '#ffd24a' : '#e8ecf2';
-          ctx.font = '700 ' + (10 * u) + 'px system-ui'; ctx.textAlign = 'center';
-          ctx.fillText(CARDS[dd], x, cy0 + 3.5 * u);
-        } else {
-          ctx.strokeStyle = 'rgba(232,236,242,.65)'; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.moveTo(x, cy0 + ch / 2 - 5 * u); ctx.lineTo(x, cy0 + ch / 2 - 1.5 * u); ctx.stroke();
-        }
+        if (CARDS[dd] !== undefined) txt(CARDS[dd], x, cy0 + 3 * u, 8.5, dd === 0 ? '#ffd24a' : 'rgba(255,255,255,.92)', 'center');
+        else { ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, cy0 + ch / 2 - 4 * u); ctx.lineTo(x, cy0 + ch / 2 - 1 * u); ctx.stroke(); }
       }
-      const mark = (bx, by, colr, diamond) => {
-        const bdeg = Renderer.degFromYaw(Math.atan2(by, bx));
-        const diff = ((bdeg - deg + 540) % 360) - 180;
-        if (Math.abs(diff) > 50) return;
-        const x = cx0 + diff * pxd;
-        ctx.fillStyle = colr;
-        ctx.beginPath();
-        if (diamond) { ctx.moveTo(x, cy0 - 6 * u); ctx.lineTo(x + 4 * u, cy0 - 1 * u); ctx.lineTo(x, cy0 + 4 * u); ctx.lineTo(x - 4 * u, cy0 - 1 * u); }
-        else { ctx.moveTo(x, cy0 - 6 * u); ctx.lineTo(x + 4 * u, cy0 + 1 * u); ctx.lineTo(x - 4 * u, cy0 + 1 * u); }
-        ctx.closePath(); ctx.fill();
-      };
       if (this.ownPos) {
+        const pip = (bx, by, colr) => {
+          const bdeg = Renderer.degFromYaw(Math.atan2(by, bx));
+          const diff = ((bdeg - deg + 540) % 360) - 180;
+          if (Math.abs(diff) > 45) return;
+          ctx.fillStyle = colr;
+          ctx.fillRect(cx0 + diff * pxd - 1.2 * u, cy0 - ch / 2 + 1 * u, 2.4 * u, ch - 2 * u);
+        };
         for (const e of (ents.en || [])) {
           const dx = e.x - this.ownPos.x, dy = e.y - this.ownPos.y;
-          if (Math.hypot(dx, dy) < 12 * TS) mark(dx, dy, e.boss ? '#ff2d55' : '#ff3b30', false);
+          if (Math.hypot(dx, dy) < 12 * ((this.level && this.level.tile) || 32)) pip(dx, dy, e.boss ? '#ff2d55' : '#ff3b30');
         }
-        if (this.level && this.level.extract) mark(this.level.extract.x - this.ownPos.x, this.level.extract.y - this.ownPos.y, '#4ade80', true);
+        if (this.level && this.level.extract) pip(this.level.extract.x - this.ownPos.x, this.level.extract.y - this.ownPos.y, '#4ade80');
       }
       ctx.restore();
-      ctx.fillStyle = '#ffd24a';
-      ctx.beginPath(); ctx.moveTo(cx0, cy0 - ch / 2 - 2 * u); ctx.lineTo(cx0 - 4 * u, cy0 - ch / 2 - 8 * u); ctx.lineTo(cx0 + 4 * u, cy0 - ch / 2 - 8 * u); ctx.closePath(); ctx.fill();
-      // health / armor / stamina — bottom left
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.moveTo(cx0, cy0 + ch / 2 + 1 * u); ctx.lineTo(cx0 - 3.4 * u, cy0 + ch / 2 + 6 * u); ctx.lineTo(cx0 + 3.4 * u, cy0 + ch / 2 + 6 * u); ctx.closePath(); ctx.fill();
+
+      // ---- crosshair (outlined, dynamic) ----
+      const tgt = 5 + (this.fpMoving ? 6 : 0) + (this.fpMuzzle > 0 ? 7 : 0) + ((me && me.sp) ? 3 : 0);
+      this.spread += (tgt - this.spread) * Math.min(1, dt * 14);
+      const g = this.spread * u, L2 = 6.5 * u;
+      const xhair = (colr, lw) => {
+        ctx.strokeStyle = colr; ctx.lineWidth = lw;
+        ctx.beginPath();
+        ctx.moveTo(W / 2 - g - L2, H / 2); ctx.lineTo(W / 2 - g, H / 2);
+        ctx.moveTo(W / 2 + g, H / 2); ctx.lineTo(W / 2 + g + L2, H / 2);
+        ctx.moveTo(W / 2, H / 2 - g - L2); ctx.lineTo(W / 2, H / 2 - g);
+        ctx.moveTo(W / 2, H / 2 + g); ctx.lineTo(W / 2, H / 2 + g + L2);
+        ctx.stroke();
+      };
+      xhair('rgba(0,0,0,.8)', 3.2 * u);
+      xhair('rgba(255,255,255,.95)', 1.5 * u);
+      ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.fillRect(W / 2 - 1.4 * u, H / 2 - 1.4 * u, 2.8 * u, 2.8 * u);
+      ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.fillRect(W / 2 - 0.7 * u, H / 2 - 0.7 * u, 1.4 * u, 1.4 * u);
+      // hitmarker
+      if (this.hitT > 0) {
+        const a = clamp(this.hitT / 0.14, 0, 1), r1 = 5 * u, r2 = 12 * u;
+        const hm = (colr, lw) => {
+          ctx.strokeStyle = colr; ctx.lineWidth = lw;
+          ctx.beginPath();
+          ctx.moveTo(W / 2 + r1, H / 2 + r1); ctx.lineTo(W / 2 + r2, H / 2 + r2);
+          ctx.moveTo(W / 2 + r1, H / 2 - r1); ctx.lineTo(W / 2 + r2, H / 2 - r2);
+          ctx.moveTo(W / 2 - r1, H / 2 + r1); ctx.lineTo(W / 2 - r2, H / 2 + r2);
+          ctx.moveTo(W / 2 - r1, H / 2 - r1); ctx.lineTo(W / 2 - r2, H / 2 - r2);
+          ctx.stroke();
+        };
+        hm('rgba(0,0,0,.85)', 3.4 * u);
+        hm(this.hitCrit ? 'rgba(255,80,60,' + a.toFixed(2) + ')' : 'rgba(255,255,255,' + a.toFixed(2) + ')', 1.8 * u);
+      }
+
+      // ---- health: bottom-left, cross icon + slim bar ----
       if (me) {
-        const bw = 180 * u, bh = 9 * u, bx = 16 * u, by = H - 24 * u;
-        ctx.fillStyle = 'rgba(8,10,14,.5)'; ctx.fillRect(bx - 5 * u, by - 17 * u, bw + 10 * u, bh + 27 * u);
-        ctx.textAlign = 'left';
-        ctx.font = '800 ' + (15 * u) + 'px system-ui';
-        ctx.fillStyle = me.hp / me.mhp > 0.35 ? '#e8ecf2' : '#ff5f52';
-        ctx.fillText(String(Math.max(0, me.hp)), bx, by - 5 * u);
-        ctx.fillStyle = 'rgba(255,255,255,.14)'; ctx.fillRect(bx, by, bw, bh);
-        ctx.fillStyle = me.hp / me.mhp > 0.35 ? '#9ef0b6' : '#ff5f52';
-        ctx.fillRect(bx, by, bw * clamp(me.hp / me.mhp, 0, 1), bh);
-        if (me.arm > 0) { ctx.fillStyle = '#8fb4ff'; ctx.fillRect(bx, by - 3.5 * u, bw * clamp(me.ar / (me.arm || 1), 0, 1), 2.5 * u); }
-        ctx.fillStyle = 'rgba(255,204,68,.75)'; ctx.fillRect(bx, by + bh + 2.5 * u, bw * clamp(me.sta / (me.msta || 1), 0, 1), 2 * u);
+        const bx = 16 * u, by = H - 20 * u, bw = 148 * u, bh = 5 * u;
+        const low = me.hp / me.mhp <= 0.35;
+        ctx.fillStyle = low ? '#ff5f52' : '#e8ecf2';                       // med cross
+        ctx.fillRect(bx, by - 9 * u, 3.2 * u, 10 * u); ctx.fillRect(bx - 3.4 * u, by - 5.6 * u, 10 * u, 3.2 * u);
+        ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(bx + 12 * u, by - 2 * u, bw, bh);
+        ctx.fillStyle = low ? '#ff5f52' : '#8ef0a0';
+        ctx.fillRect(bx + 12 * u, by - 2 * u, bw * clamp(me.hp / me.mhp, 0, 1), bh);
+        ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 0.8 * u;
+        ctx.strokeRect(bx + 12 * u, by - 2 * u, bw, bh);
+        if (me.arm > 0) { ctx.fillStyle = '#8fb4ff'; ctx.fillRect(bx + 12 * u, by - 5 * u, bw * clamp(me.ar / (me.arm || 1), 0, 1), 2 * u); }
+        txt(String(Math.max(0, me.hp)), bx + 16 * u + bw, by + 3.5 * u, 10, low ? '#ff5f52' : 'rgba(255,255,255,.85)', 'left', 600);
         if (me.hp / me.mhp < 0.3) {
           const a = 0.15 + 0.11 * Math.sin(this.time * 6);
           const gg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.78);
@@ -1230,42 +1303,42 @@
           ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
         }
       }
-      // ammo / weapon / kills — bottom + top right
+
+      // ---- ammo cluster: bottom-right, big condensed numbers ----
       if (me) {
-        ctx.textAlign = 'right';
-        ctx.fillStyle = 'rgba(8,10,14,.5)'; ctx.fillRect(W - 176 * u, H - 62 * u, 160 * u, 46 * u);
-        ctx.font = '800 ' + (28 * u) + 'px system-ui';
-        ctx.fillStyle = me.mag === 0 ? '#ff5f52' : '#e8ecf2';
-        ctx.fillText(String(me.mag), W - 74 * u, H - 26 * u);
-        ctx.font = '700 ' + (13 * u) + 'px system-ui'; ctx.fillStyle = 'rgba(232,236,242,.72)';
-        ctx.fillText('/ ' + me.res, W - 28 * u, H - 26 * u);
-        ctx.font = '600 ' + (9.5 * u) + 'px system-ui'; ctx.fillStyle = 'rgba(232,236,242,.55)';
-        ctx.fillText(String(((D.WEAPONS || {})[me.wp] || {}).name || me.wp || '').toUpperCase(), W - 28 * u, H - 44 * u);
-        if (me.rl > 0) {
-          ctx.fillStyle = 'rgba(255,210,74,' + (0.6 + 0.4 * Math.sin(this.time * 10)).toFixed(2) + ')';
-          ctx.font = '800 ' + (10.5 * u) + 'px system-ui'; ctx.fillText('RELOADING', W - 28 * u, H - 12 * u);
+        const ax = W - 18 * u;
+        txt(String(me.mag), ax - 44 * u, H - 22 * u, 34, me.mag === 0 ? '#ff5f52' : '#f2f5f9', 'right', 800);
+        txt('/ ' + me.res, ax, H - 24 * u, 13, 'rgba(242,245,249,.66)', 'right', 600);
+        const wn = String(((D.WEAPONS || {})[me.wp] || {}).name || me.wp || '').toUpperCase();
+        txt(wn, ax, H - 44 * u, 9, 'rgba(242,245,249,.6)', 'right', 600);
+        const wdef = (D.WEAPONS || {})[me.wp] || {};
+        if (me.rl > 0 && wdef.reload) {
+          const pw = 74 * u, prog = clamp(1 - me.rl / wdef.reload, 0, 1);
+          ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(ax - pw, H - 14 * u, pw, 2.6 * u);
+          ctx.fillStyle = '#ffd24a'; ctx.fillRect(ax - pw, H - 14 * u, pw * prog, 2.6 * u);
         } else if (me.tn > 0) {
-          ctx.fillStyle = '#ff9a3c'; ctx.font = '700 ' + (10.5 * u) + 'px system-ui';
-          ctx.fillText(me.tn + 'x ' + String(me.th || 'THROW').toUpperCase(), W - 100 * u, H - 12 * u);
+          ctx.strokeStyle = '#ff9a3c'; ctx.lineWidth = 1.2 * u;
+          ctx.beginPath(); ctx.arc(ax - 84 * u, H - 28 * u, 5 * u, 0, 6.2832); ctx.stroke();
+          txt('x' + me.tn, ax - 74 * u, H - 24 * u, 10, '#ff9a3c', 'left', 700);
         }
-        ctx.fillStyle = 'rgba(232,236,242,.85)'; ctx.font = '800 ' + (12 * u) + 'px system-ui';
-        ctx.fillText('KILLS ' + (me.k || 0), W - 16 * u, 20 * u);
+        txt('KILLS  ' + (me.k || 0), W - 16 * u, 20 * u, 11, 'rgba(242,245,249,.9)', 'right', 700);
       }
-      // boss bar
+
+      // ---- boss bar: segmented, top-centre under compass ----
       const boss = (ents.en || []).find(e => e.b);
       if (boss) {
-        const bw2 = Math.min(W * 0.42, 420 * u), bx2 = W / 2 - bw2 / 2, by2 = 36 * u;
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#ff2d55'; ctx.font = '800 ' + (11 * u) + 'px system-ui';
-        ctx.fillText(String(((D.ENEMIES || {})[boss.t] || {}).name || 'MANANANGGAL').toUpperCase(), W / 2, by2 - 4 * u);
-        ctx.fillStyle = 'rgba(255,255,255,.14)'; ctx.fillRect(bx2, by2, bw2, 5.5 * u);
-        ctx.fillStyle = '#ff2d55'; ctx.fillRect(bx2, by2, bw2 * clamp(boss.hp / (boss.mhp || 1), 0, 1), 5.5 * u);
+        const bw2 = Math.min(W * 0.38, 380 * u), bx2 = W / 2 - bw2 / 2, by2 = 32 * u, seg = 24;
+        txt(String(((D.ENEMIES || {})[boss.t] || {}).name || 'MANANANGGAL').toUpperCase(), W / 2, by2 - 3 * u, 10, '#ff2d55', 'center', 800);
+        const frac = clamp(boss.hp / (boss.mhp || 1), 0, 1);
+        for (let i = 0; i < seg; i++) {
+          const on = (i + 0.5) / seg <= frac;
+          ctx.fillStyle = on ? '#ff2d55' : 'rgba(255,255,255,.13)';
+          ctx.fillRect(bx2 + (bw2 / seg) * i + 0.6 * u, by2, bw2 / seg - 1.2 * u, 4.5 * u);
+        }
       }
       ctx.textAlign = 'left';
     }
 
-    /* Edge-of-screen placement for an off-view bearing (view space: +x forward,
-       +y right). Pure so tests can pin the geometry. */
     static threatMarker(bear, W, H, m) {
       const vx = Math.cos(bear), vy = Math.sin(bear);   // view space: +x fwd, +y right
       const behind = vx < 0;
@@ -1275,8 +1348,6 @@
       return { px: W / 2 + vy * K, py: H / 2 - vx * K, side: vy >= 0 ? 1 : -1, behind };
     }
 
-    /* First-person awareness: off-view threat chevrons + proximity pulse +
-       a directional damage ring. FP has no peripheral vision; this is yours. */
     drawAwareness(ctx, ents, dt) {
       const W = this.w, H = this.h, own = this.ownPos;
       if (!own || !this.level) return;

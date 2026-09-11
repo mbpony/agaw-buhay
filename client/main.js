@@ -988,7 +988,7 @@
     // director tension -> music
     AU.setTension(s.dir ? s.dir.i * 0.6 + (s.dir.s || 0) * 0.4 : 0);
     // minimap
-    renderer.drawMinimap($('minimap'), s);
+    if (!renderer.fp) renderer.drawMinimap($('minimap'), s);   // FP draws its own circular minimap
     if (renderer.opts.fps && $('fps')) $('fps').textContent = renderer.stats.fps + ' fps · ' + renderer.stats.ents + ' ents';
   }
 
