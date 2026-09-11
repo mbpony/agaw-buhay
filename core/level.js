@@ -563,6 +563,35 @@
     pick(near, 40).forEach(c => L.nodes.push({ x: (c.x + 0.5) * L.tile, y: (c.y + 0.5) * L.tile, kind: 'near' }));
     L.spawns = L.nodes.slice();
     if (!L.nodes.length) L.nodes.push({ x: L.spawn.x + 400, y: L.spawn.y + 400, kind: 'far' });
+    L.nodes.forEach(n => tagNode(L, n));
+  }
+
+  /* Master doc §27: spawn nodes carry semantic tags so the director can place
+     folklore-correct enemies (tiyanak -> flooded/dark, mangkukulam -> interior)
+     and presentation can react. Plain data — deterministic + serialisable. */
+  function tagNode(L, n) {
+    const t = tileAt(L, n.x, n.y);
+    const tags = [];
+    if (t === T.WATER) tags.push('flooded');
+    else if (t === T.ROAD || t === T.RAIL) tags.push('street');
+    else if (t === T.FLOOR) tags.push('interior');
+    else if (t === T.RUBBLE) tags.push('rubble');
+    if (t !== T.WATER) {
+      const gx = Math.floor(n.x / L.tile), gy = Math.floor(n.y / L.tile);
+      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (let i = 0; i < nb.length; i++) {
+        const nx = gx + nb[i][0], ny = gy + nb[i][1];
+        if (nx >= 0 && ny >= 0 && nx < L.w && ny < L.h && L.g[idx(L, nx, ny)] === T.WATER) { tags.push('flood_edge'); break; }
+      }
+    }
+    let dl = 1e9;
+    for (let i = 0; i < L.lights.length; i++) {
+      const l = L.lights[i]; if (!l) continue;
+      const d = Math.hypot(l.x - n.x, l.y - n.y); if (d < dl) dl = d;
+    }
+    if (dl > 430) tags.push('dark');
+    n.tags = tags;
+    return n;
   }
 
   /* -------- flow field (multi-source BFS from survivors) for enemy nav -------- */

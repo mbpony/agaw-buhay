@@ -273,9 +273,24 @@
         t.rotation.y = rnd() * 6.28;
         dress.add(t);
       }
+      // zone streaming (lite): bucket dressing into 720px chunks so the renderer
+      // can hide far chunks on mobile instead of paying for the whole map
+      const CHUNK = 720, chunks = new Map();
+      for (const child of dress.children.slice()) {
+        const kx = Math.floor(child.position.x / CHUNK), ky = Math.floor(child.position.z / CHUNK);
+        const key = kx + ',' + ky;
+        let c = chunks.get(key);
+        if (!c) {
+          c = new THREE.Group();
+          c.userData.cx = (kx + 0.5) * CHUNK; c.userData.cy = (ky + 0.5) * CHUNK;
+          chunks.set(key, c); dress.add(c);
+        }
+        dress.remove(child); c.add(child);
+      }
+      dress.userData.chunks = Array.from(chunks.values());
     }
     g.add(dress);
-    return { group: g, water, dress, walls, counts: { solids: solids.length, waters: waters.length, roads: roads.length } };
+    return { group: g, water, dress, walls, counts: { solids: solids.length, waters: waters.length, roads: roads.length, chunks: (dress.userData.chunks || []).length } };
   }
 
   /* ---------------- scene kit (no WebGL: testable headlessly) ---------------- */
@@ -387,10 +402,11 @@
       }
       for (const [key, e] of this.ents) if (!seen.has(key)) { this.scene.remove(e.m.group); this.ents.delete(key); }
 
-      // camera = predicted own position + yaw
+      // camera = predicted own position + yaw (+ presentation pitch)
       if (own) {
         this.camera.position.set(own.x, EYE + (this.bob || 0), own.y);
         this.camera.rotation.y = -yaw;
+        this.camera.rotation.x = Math.max(-1.15, Math.min(1.15, this.pitch || 0));
         this.flashTarget.position.set(own.x + Math.cos(yaw) * 300, EYE - 12, own.y + Math.sin(yaw) * 300);
       }
     }
@@ -586,6 +602,18 @@
       }
       const ownE = this.youId ? ents.surv.find(e => e.id === this.youId) : null;
       this.ownPos = ownE && !ownE.dd ? { x: ownE.x, y: ownE.y } : null;
+      // pitch: consume accumulated input, then gentle Manananggal look-up assist
+      this.pitch = Math.max(-1.15, Math.min(1.15, (this.pitch || 0) + (this.pitchInput || 0)));
+      this.pitchInput = 0;
+      const boss = (ents.en || []).find(e => e.t === 'manananggal' && (e.z || 0) > 26);
+      if (boss && this.ownPos) {
+        const bd = Math.hypot(boss.x - this.ownPos.x, boss.y - this.ownPos.y);
+        if (bd < 1100) {
+          const want = Math.atan2((boss.z || 0) + 34 - EYE, Math.max(bd, 90));
+          this.pitch += (Math.min(want, 1.1) - this.pitch) * Math.min(1, dt * 1.1) * 0.55;
+        }
+      }
+      this.kit.pitch = this.pitch;
       this.consumeFx(snap);
       const me = ownE;
       this.kit.setWeapon(me && me.wp);
@@ -596,6 +624,15 @@
       if (this.fpMuzzle > 0) this.fpMuzzle -= dt;
       this.kit.animateVm(dt, this.fpMoving, kick, me && me.rl > 0 ? me.rl : 0, Math.max(-3, Math.min(3, this.yawVel || 0)));
       this.kit.weather(dt);
+      // zone streaming: hide dressing chunks beyond ~2400 units of the camera
+      const chunks = this.kit.world && this.kit.world.dress && this.kit.world.dress.userData ? this.kit.world.dress.userData.chunks : null;
+      if (chunks && this.tier !== 'high') {
+        const cp = this.kit.camera.position;
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const c = chunks[ci], dx = c.userData.cx - cp.x, dy = c.userData.cy - cp.z;
+          c.visible = dx * dx + dy * dy < 2400 * 2400;
+        }
+      }
       // camera shake from sim
       const sh = this.opts.shake ? (snap.cam ? snap.cam.sh : 0) : 0;
       if (sh > 0.4) this.kit.camera.position.x += (Math.random() - 0.5) * sh * 1.6, this.kit.camera.position.y += (Math.random() - 0.5) * sh * 1.2;

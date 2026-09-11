@@ -190,9 +190,17 @@
     spit(pos, cam, viewW) { if (!AC) return; const s = spatial(pos, cam, viewW); noise(0.24, { freq: 900, q: 1.6, gain: 0.24 * s.vol, pan: s.pan, sweep: 300 }); },
     charge(pos, cam, viewW) { if (!AC) return; const s = spatial(pos, cam, viewW); tone(90, 0.6, { type: 'sawtooth', to: 240, gain: 0.22 * s.vol, pan: s.pan }); },
     smash(pos, cam, viewW) { if (!AC) return; const s = spatial(pos, cam, viewW); noise(0.4, { freq: 300, q: 0.5, gain: 0.5 * s.vol, pan: s.pan, type: 'lowpass', sweep: 60 }); tone(70, 0.35, { type: 'sine', to: 30, gain: 0.34 * s.vol, pan: s.pan }); },
-    step(pos, cam, viewW, water) {
+    /* Surface-aware footsteps (master doc §29/§30). `surface` accepts the legacy
+       water=true boolean or a tile-kind string. Own-player steps pass pos==cam. */
+    step(pos, cam, viewW, surface) {
       if (!AC) return; const s = spatial(pos, cam, viewW);
-      noise(water ? 0.13 : 0.06, { freq: water ? 1600 : 700, q: water ? 0.8 : 2, gain: (water ? 0.13 : 0.07) * s.vol, pan: s.pan, type: water ? 'bandpass' : 'highpass' });
+      const k = surface === true ? 'water' : (surface || 'concrete');
+      if (k === 'water') noise(0.13, { freq: 1600, q: 0.8, gain: 0.13 * s.vol, pan: s.pan, type: 'bandpass' });
+      else if (k === 'asphalt') { noise(0.05, { freq: 520, q: 1.2, gain: 0.09 * s.vol, pan: s.pan, type: 'lowpass' }); tone(90, 0.04, { type: 'sine', to: 60, gain: 0.05 * s.vol, pan: s.pan }); }
+      else if (k === 'metal') { tone(340, 0.09, { type: 'triangle', to: 260, gain: 0.06 * s.vol, pan: s.pan }); noise(0.05, { freq: 3200, q: 2, gain: 0.05 * s.vol, pan: s.pan, type: 'highpass' }); }
+      else if (k === 'rubble') noise(0.08, { freq: 2400, q: 0.7, gain: 0.07 * s.vol, pan: s.pan, type: 'bandpass' });
+      else if (k === 'grass') noise(0.09, { freq: 2800, q: 0.5, gain: 0.05 * s.vol, pan: s.pan, type: 'bandpass' });
+      else noise(0.06, { freq: 700, q: 2, gain: 0.07 * s.vol, pan: s.pan, type: 'highpass' });
     },
     horde(cam) {
       if (!AC) return;

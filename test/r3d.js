@@ -91,5 +91,45 @@ console.log('\n== Viewmodels + tiers ==');
   ok(kit.world.dress.visible === true && !!kit.rain, 'tier upgrades restore rain + dressing');
 }
 
+console.log('\n== Worldgen: spawn-node tags (master doc §27) ==');
+{
+  const KNOWN = ['flooded', 'street', 'interior', 'rubble', 'flood_edge', 'dark'];
+  let total = 0, dark = 0, wet = 0; const bad = [];
+  for (const id of ['1-1', '1-2', '1-3']) {
+    const level = LV.generate(D.stageById(id));
+    ok(level.nodes.length > 0, id + ' has spawn nodes');
+    for (const n of level.nodes) {
+      total++;
+      if (!Array.isArray(n.tags) || !n.tags.length) { bad.push(id + ':untagged'); continue; }
+      for (const t of n.tags) if (KNOWN.indexOf(t) < 0) bad.push(id + ':' + t);
+      if (n.tags.indexOf('dark') >= 0) dark++;
+      if (n.tags.indexOf('flooded') >= 0 || n.tags.indexOf('flood_edge') >= 0) wet++;
+    }
+    const rt = LV.deserialize(LV.serialize(level));
+    ok(rt.nodes.length === level.nodes.length && rt.nodes.every(n => Array.isArray(n.tags)), id + ' node tags survive serialize round-trip');
+  }
+  ok(bad.length === 0, 'every node carries only known tags (' + total + ' nodes)', bad.slice(0, 4).join(' '));
+  ok(dark > 0 && wet > 0, 'tag variety exists: ' + dark + ' dark, ' + wet + ' flood-related');
+}
+
+console.log('\n== Zone streaming: dressing chunks + camera pitch ==');
+{
+  const level = LV.generate(D.stageById('1-1'));
+  const w = R3.buildWorld(level, {});
+  ok((w.counts.chunks || 0) > 0, 'street dressing bucketed into streamable chunks (' + w.counts.chunks + ')');
+  const chunk = w.dress.userData.chunks[0];
+  ok(!!chunk && chunk.userData.cx !== undefined && chunk.children.length > 0, 'chunks carry world centers + items');
+  const kit = new R3.SceneKit();
+  kit.setLevel(level, {});
+  kit.pitch = 0.6;
+  kit.sync({ surv: [], en: [], it: [] }, { id: 'p0', x: 100, y: 100 }, 0.8, 1 / 60);
+  ok(Math.abs(kit.camera.rotation.x - 0.6) < 0.001, 'camera pitch applied from kit.pitch');
+  kit.pitch = 9;
+  kit.sync({ surv: [], en: [], it: [] }, { id: 'p0', x: 100, y: 100 }, 0.8, 1 / 60);
+  ok(kit.camera.rotation.x <= 1.15 + 1e-6, 'pitch clamped so players cannot flip the camera');
+  const want = Math.atan2(180 + 34 - R3.EYE, 300);
+  ok(want > 0.4 && want < 1.2, 'Manananggal look-up assist targets a sane angle for an airborne boss');
+}
+
 console.log('\n' + (fail ? '3D SUITE FAILED' : '3D SUITE OK') + ' — pass ' + pass + ' fail ' + fail);
 process.exit(fail ? 1 : 0);

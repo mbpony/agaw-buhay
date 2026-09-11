@@ -28,7 +28,7 @@
     ping: 0, pingT: 0, lastSnap: null, ended: false, chatOpen: false, paused: false,
     // phase 2 client-side prediction: un-acked input samples + predicted own state
     iseq: 0, pend: [], curSample: null, pred: null, predOff: null, predSpeed: 0,
-    locked: false, lookDX: 0, look: dx => { app.lookDX += dx; },
+    locked: false, lookDX: 0, lookDY: 0, pitch: 0, pitchDelta: 0, look: dx => { app.lookDX += dx; },
     reconnecting: false, rejoinCode: null,
     yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
@@ -198,7 +198,7 @@
       return `<div class="kv"><span style="color:${c}"><b style="color:${c}">${e.name}</b> — ${e.variant}</span><span class="hint" style="max-width:56%;text-align:right">${e.desc}</span></div>`;
     }).join('');
     $('howKeys').innerHTML = [['WASD', 'Move'], ['Mouse', 'Aim'], ['LMB', 'Fire'], ['Shift', 'Sprint'], ['R', 'Reload'], ['Space', 'Ability'], ['E', 'Interact / Revive / Take loot'], ['F', 'Melee'], ['Q', 'Swap weapon (slot 2)'], ['G', 'Throw molotov / bomb'], ['T', 'Chat'], ['Esc', 'Pause'], ['M', 'Mute'], ['Tab', 'Scoreboard']]
-      .concat(touch.on ? [['LEFT PAD', 'Move (full tilt sprints)'], ['RIGHT PAD', 'Aim — deflect to auto-fire'], ['FIRE / ABILITY / USE / RLD / HIT / RUN', 'Thumb cluster'], ['SWAP / THROW', 'Second weapon and grenades'], ['GFX', 'Cycle graphics quality']] : []).map(k => `<div class="key"><kbd>${k[0]}</kbd> ${k[1]}</div>`).join('');
+      .concat(touch.on ? [['LEFT PAD', 'Move (full tilt sprints)'], ['RIGHT PAD', 'Aim + look — vertical tilts the camera, deflect to auto-fire'], ['FIRE / ABILITY / USE / RLD / HIT / RUN', 'Thumb cluster'], ['SWAP / THROW', 'Second weapon and grenades'], ['GFX', 'Cycle graphics quality']] : []).map(k => `<div class="key"><kbd>${k[0]}</kbd> ${k[1]}</div>`).join('');
   }
 
   /* ================= LOBBY ================= */
@@ -448,7 +448,10 @@
   const canvas = $('game');
   canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; mouse.seen = true;
-    if (!touch.on && renderer.fp && e.movementX) app.lookDX += e.movementX;   // mouse-look (locked or not)
+    if (!touch.on && renderer.fp) {                                        // mouse-look (locked or not)
+      if (e.movementX) app.lookDX += e.movementX;
+      if (e.movementY) app.lookDY += e.movementY;
+    }
   });
   // click the world to capture the mouse like a real FPS; Esc releases it
   canvas.addEventListener('click', () => {
@@ -787,12 +790,20 @@
         app.lookDX = 0;
       }
       if (turn) app.yaw += turn * (touch.on ? 2.7 : 2.3) * (app.frameDt || 1 / 60);
+      /* Pitch is PRESENTATION-only (the sim aims in 2D yaw): mouse Y or the
+         right stick's vertical axis tilt the camera; the 3D renderer consumes
+         the delta and adds the Manananggal look-up assist on top. */
+      const psens = (settings.sens || 0.0026);
+      if (!touch.on) { app.pitchDelta -= (app.lookDY || 0) * psens * 0.85; app.lookDY = 0; }
+      else if (touch.aim.id !== null && touch.aim.y) app.pitchDelta -= touch.aim.y * 2.1 * (app.frameDt || 1 / 60);
       const fwd = -my, str = mx;
       const cy = Math.cos(app.yaw), sy = Math.sin(app.yaw);
       input.mx = cy * fwd - sy * str;
       input.my = sy * fwd + cy * str;
       renderer.fpMoving = (Math.abs(fwd) + Math.abs(str)) > 0.1;
       renderer.yaw = app.yaw;
+      renderer.pitchInput = (renderer.pitchInput || 0) + app.pitchDelta;
+      app.pitchDelta = 0;
     } else {
       input.mx = mx; input.my = my;
     }
@@ -1033,6 +1044,18 @@
 
   /* ================= MAIN LOOP ================= */
   let last = performance.now(), netAcc = 0, pingAcc = 0;
+  /* Tile under a world point -> footstep/acoustic surface name (master doc §29). */
+  function surfAt(p) {
+    const L = (renderer && (renderer.level || (renderer.kit && renderer.kit.level))) || app.level;
+    if (!L || !LV.tileAt) return 'concrete';
+    const t = LV.tileAt(L, p.x, p.y), T = D.TILE;
+    if (t === T.WATER) return 'water';
+    if (t === T.RAIL) return 'metal';
+    if (t === T.ROAD) return 'asphalt';
+    if (t === T.RUBBLE) return 'rubble';
+    return 'concrete';
+  }
+
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     app.frameDt = dt;
@@ -1040,7 +1063,7 @@
       // seed the view yaw from wherever the survivor was already facing
       if (!app.yawInit && app.lastSnap && app.lastSnap.surv) {
         const m0 = app.lastSnap.surv.find(x => x.id === app.you);
-        if (m0) { app.yaw = m0.a; app.yawInit = true; }
+        if (m0) { app.yaw = m0.a; app.yawInit = true; app.pitch = 0; app.pitchDelta = 0; renderer.pitch = 0; renderer.pitchInput = 0; }
       }
       const inp = gatherInput();
       if (app.paused) { inp.fire = false; inp.mx = 0; inp.my = 0; }
@@ -1114,6 +1137,18 @@
       }
       renderer.predInput = app.paused ? null : { mx: inp.mx, my: inp.my, sprint: inp.sprint };
       renderer.draw(now, dt);
+      // own-player footsteps: stride accumulator + tile surface (client-side SFX only)
+      const fOwn = renderer.ownPos;
+      if (fOwn && renderer.fpMoving && !app.paused) {
+        const lp = app.lastStepPos;
+        app.stepAcc = (app.stepAcc || 0) + (lp ? Math.hypot(fOwn.x - lp.x, fOwn.y - lp.y) : 0);
+        app.lastStepPos = { x: fOwn.x, y: fOwn.y };
+        const stride = surfAt(fOwn) === 'water' ? 46 : 38;
+        if (app.stepAcc >= stride) {
+          app.stepAcc = 0;
+          AU.SFX.step(fOwn, { x: fOwn.x, y: fOwn.y, yaw: renderer.yaw }, renderer.w || window.innerWidth, surfAt(fOwn));
+        }
+      } else { app.lastStepPos = null; app.stepAcc = 0; }
       if (settings.qualityAuto) renderer.autoTier(dt * 1000);
       updateHud(dt);
     } else if (app.screen === 'title' || app.screen === 'how' || app.screen === 'lobby') {
