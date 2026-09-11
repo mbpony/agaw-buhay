@@ -64,13 +64,36 @@
   function save() {
     try { win.localStorage.setItem(KEY, JSON.stringify(layout)); } catch (e) {}
   }
+  function saneEntry(e) {
+    if (!e || typeof e !== 'object') return null;
+    var o = {};
+    var keys = ['dx', 'dy', 's', 'o'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = e[keys[i]];
+      if (v == null) continue;
+      v = Number(v);
+      if (!isFinite(v)) continue;                 // NaN/Infinity can never hide a widget again
+      o[keys[i]] = v;
+    }
+    if (o.s != null) o.s = clamp(o.s, 0.5, 2);
+    if (o.o != null) o.o = clamp(o.o, 0.2, 1);
+    if (o.dx != null) o.dx = clamp(o.dx, -85, 85);
+    if (o.dy != null) o.dy = clamp(o.dy, -85, 85);
+    return (o.dx || o.dy || o.s || o.o) ? o : null;
+  }
   function load() {
     layout = { v: 1, w: {}, c: {} };
     try {
       var raw = win.localStorage.getItem(KEY);
       if (raw) {
         var o = JSON.parse(raw);
-        if (o && o.v === 1) { layout.w = o.w || {}; layout.c = o.c || {}; }
+        if (o && o.v === 1) {
+          var src = [o.w || {}, o.c || {}], dst = [layout.w, layout.c];
+          for (var g = 0; g < 2; g++) for (var id in src[g]) {
+            var e = saneEntry(src[g][id]);
+            if (e) dst[g][id] = e;
+          }
+        }
       }
     } catch (e) {}
     return layout;
@@ -89,7 +112,11 @@
     for (var i = 0; i < WIDGETS.length; i++) if (WIDGETS[i].id === id) found = true;
     if (!found) return null;
     var e = getWidget(id);
-    for (var k in patch) if (patch.hasOwnProperty(k)) e[k] = patch[k];
+    for (var k in patch) if (patch.hasOwnProperty(k)) {
+      var v = patch[k];
+      e[k] = (typeof v === 'number' && isFinite(v)) ? v : null;
+      if (e[k] == null) delete e[k];
+    }
     if (e.dx === 0) delete e.dx; if (e.dy === 0) delete e.dy;
     if (e.s === 1) delete e.s; if (e.o === 1) delete e.o;
     if (!e.dx && !e.dy && !e.s && !e.o) delete layout.w[id];
@@ -101,7 +128,11 @@
     for (var i = 0; i < CANVAS_PANELS.length; i++) if (CANVAS_PANELS[i].id === id) found = true;
     if (!found) return null;
     var e = getCanvas(id);
-    for (var k in patch) if (patch.hasOwnProperty(k)) e[k] = patch[k];
+    for (var k in patch) if (patch.hasOwnProperty(k)) {
+      var v2 = patch[k];
+      e[k] = (typeof v2 === 'number' && isFinite(v2)) ? v2 : null;
+      if (e[k] == null) delete e[k];
+    }
     if (e.dx === 0) delete e.dx; if (e.dy === 0) delete e.dy; if (e.o === 1) delete e.o;
     if (!e.dx && !e.dy && (e.o == null)) delete layout.c[id];
     return e;
@@ -112,7 +143,9 @@
     var out = {};
     for (var id in layout.c) {
       var e = layout.c[id];
-      out[id] = { dx: (e.dx || 0) / 100 * W, dy: (e.dy || 0) / 100 * H, o: e.o == null ? 1 : e.o };
+      var dx = (e.dx || 0) / 100 * W, dy = (e.dy || 0) / 100 * H, o = e.o == null ? 1 : e.o;
+      if (!isFinite(dx) || !isFinite(dy) || !isFinite(o)) continue;   // never poison the ctx
+      out[id] = { dx: dx, dy: dy, o: clamp(o, 0.2, 1) };
     }
     return out;
   }
@@ -320,6 +353,9 @@
     if (!doc || !win || inited) return api;
     inited = true;
     for (var i = 0; i < WIDGETS.length; i++) els[WIDGETS[i].id] = doc.querySelector(WIDGETS[i].sel);
+    try {
+      if (win.location && /[?&]hudreset=1/.test(win.location.search)) { win.localStorage.removeItem(KEY); }
+    } catch (e) {}
     load();
     apply();
     var t = null;

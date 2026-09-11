@@ -501,6 +501,9 @@
       canvas2d.parentNode.insertBefore(this.glCanvas, canvas2d);
       canvas2d.style.background = 'transparent';
       this.gl = new THREE.WebGLRenderer({ canvas: this.glCanvas, antialias: true, powerPreference: 'high-performance' });
+      this.contextLost = false;
+      this.glCanvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); this.contextLost = true; }, false);
+      this.glCanvas.addEventListener('webglcontextrestored', () => { this.contextLost = false; }, false);
       this.kit = new SceneKit();
       this.fp = true;
       this.localMode = false;
@@ -608,6 +611,8 @@
       }
     }
     draw(now, dt) {
+      if (this.contextLost) throw new Error('WebGL context lost');   // main.js falls back to raycast
+      if (!this.w || !this.h) this.resize();                          // zero-size self-heal
       const s = this.sample(now);
       if (!s || !this.kit.level) return;
       const snap = s.b;

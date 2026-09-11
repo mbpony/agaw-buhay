@@ -1220,6 +1220,7 @@
       const withPanel = (key, fn) => {
         const p = HP[key];
         if (!p || (!p.dx && !p.dy && (p.o == null || p.o === 1))) { fn(); return; }
+        if (!isFinite(p.dx) || !isFinite(p.dy) || !isFinite(p.o == null ? 1 : p.o)) { fn(); return; }
         ctx.save();
         if (p.dx || p.dy) ctx.translate(p.dx || 0, p.dy || 0);
         if (p.o != null && p.o !== 1) ctx.globalAlpha = (typeof ctx.globalAlpha === 'number' ? ctx.globalAlpha : 1) * p.o;

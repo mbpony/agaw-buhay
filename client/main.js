@@ -29,6 +29,7 @@
     // phase 2 client-side prediction: un-acked input samples + predicted own state
     iseq: 0, pend: [], curSample: null, pred: null, predOff: null, predSpeed: 0,
     locked: false, lookDX: 0, lookDY: 0, pitch: 0, pitchDelta: 0, look: dx => { app.lookDX += dx; },
+    dbg: /[?&]dbg=1/.test(location.search), lastDrawError: null,
     reconnecting: false, rejoinCode: null,
     yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
@@ -1016,6 +1017,24 @@
     // minimap
     if (!renderer.fp) renderer.drawMinimap($('minimap'), s);   // FP draws its own circular minimap
     if (renderer.opts.fps && $('fps')) $('fps').textContent = renderer.stats.fps + ' fps · ' + renderer.stats.ents + ' ents';
+    // ?dbg=1 — on-screen diagnostics for field debugging (black-screen reports)
+    if (app.dbg) {
+      let d = $('dbgbox');
+      if (!d) {
+        d = document.createElement('div'); d.id = 'dbgbox';
+        d.style.cssText = 'position:fixed;right:8px;top:8px;z-index:99;background:rgba(0,0,0,.82);color:#8ef0a0;font:11px/1.5 monospace;padding:8px 10px;border:1px solid #2c9149;border-radius:8px;white-space:pre;pointer-events:none;max-width:46vw';
+        document.body.appendChild(d);
+      }
+      const r = renderer;
+      const lay = window.ABAW_HUDL ? JSON.stringify(window.ABAW_HUDL.layout) : 'n/a';
+      d.textContent =
+        'renderer: ' + (window.ABAW_R3D && r instanceof ABAW_R3D.Renderer3D ? '3D(three)' : 'raycast') +
+        (r.contextLost ? ' CONTEXT-LOST' : '') + '\n' +
+        'size: ' + r.w + 'x' + r.h + '  fails: ' + (r._drawFails || 0) + '\n' +
+        'webgl: ' + (window.ABAW_R3D ? ABAW_R3D.webglAvailable() : false) + '\n' +
+        'drawErr: ' + (app.lastDrawError || 'none') + '\n' +
+        'hudlayout: ' + lay.slice(0, 160);
+    }
   }
 
   /* ================= CHAT / PAUSE ================= */
@@ -1158,6 +1177,7 @@
       } catch (err) {
         // a dead draw loop = permanent black screen; degrade instead of dying
         renderer._drawFails = (renderer._drawFails || 0) + 1;
+        app.lastDrawError = String(err && err.message || err);
         if (renderer._drawFails === 3 && window.ABAW_R3D && window.ABAW_RENDER && renderer instanceof ABAW_R3D.Renderer3D) {
           try {
             const old = renderer;
