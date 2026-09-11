@@ -144,5 +144,43 @@ console.log('\n== Edit mode lifecycle ==');
   H.endEdit(false);
 }
 
+console.log('\n== 3D HUD shim contract (regression: deployed black screen) ==');
+{
+  win.eval(read('client/vendor/three.min.js'));
+  win.eval(read('client/r3d.js'));
+  const R3 = win.ABAW_R3D;
+  ok(!!R3 && typeof R3.makeHudShim === 'function', 'r3d exposes makeHudShim');
+  const shim = R3.makeHudShim();
+  ok(typeof shim.drawMinimapFP === 'function',
+    'shim carries the borrowed drawMinimapFP method (drawHud calls this.drawMinimapFP)');
+  const calls = { translate: [], save: 0, restore: 0 };
+  const grad = { addColorStop() {} };
+  const ctx = {
+    globalAlpha: 1, font: '', fillStyle: '', strokeStyle: '', lineWidth: 1, textAlign: '',
+    save() { calls.save++; }, restore() { calls.restore++; },
+    translate(x, y) { calls.translate.push([x, y]); },
+    scale() {}, rotate() {}, clip() {}, rect() {}, beginPath() {}, closePath() {},
+    moveTo() {}, lineTo() {}, stroke() {}, fill() {}, arc() {}, ellipse() {},
+    quadraticCurveTo() {}, fillRect() {}, strokeRect() {}, clearRect() {},
+    fillText() {}, strokeText() {}, measureText() { return { width: 10 }; },
+    createLinearGradient() { return grad; }, createRadialGradient() { return grad; },
+    setTransform() {}, drawImage() {}
+  };
+  const R = win.ABAW_RENDER.Renderer;
+  let threw = null;
+  try {
+    shim.w = 800; shim.h = 360; shim.yaw = 0.4; shim.youId = 'p0';
+    shim.ownPos = { x: 120, y: 140 }; shim.time = 1; shim.level = { tile: 32, extract: { x: 500, y: 500 } };
+    const ents = {
+      surv: [{ id: 'p0', hp: 90, mhp: 100, mag: 20, res: 60, wp: 'smg', k: 1, arm: 0, rl: 0, tn: 0, sp: false }],
+      en: [{ i: 1, t: 'bangkay', x: 300, y: 300, a: 0, hp: 10, mhp: 10 }]
+    };
+    R.prototype.drawHud.call(shim, ctx, ents, {}, 1 / 60);
+    R.prototype.drawAwareness.call(shim, ctx, ents, 1 / 60);
+  } catch (e) { threw = e; }
+  ok(!threw, 'drawHud + drawAwareness run on a fresh shim without throwing', threw && threw.message);
+  ok(calls.save === calls.restore, 'shim draw leaves ctx save/restore balanced');
+}
+
 console.log('\n' + (fail ? 'HUD LAYOUT SUITE FAILED' : 'HUD LAYOUT SUITE OK') + ' — pass ' + pass + ' fail ' + fail);
 process.exit(fail ? 1 : 0);

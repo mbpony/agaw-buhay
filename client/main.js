@@ -453,10 +453,19 @@
       if (e.movementY) app.lookDY += e.movementY;
     }
   });
-  // click the world to capture the mouse like a real FPS; Esc releases it
+  // click the world to capture the mouse like a real FPS; Esc releases it.
+  // Chrome refuses re-lock for ~1.25s after an Esc-exit and REJECTS the promise
+  // it returns (try/catch cannot see that) -> swallow the rejection quietly.
+  let lockCooldownUntil = 0;
+  document.addEventListener('pointerlockchange', () => {
+    if (!document.pointerLockElement) lockCooldownUntil = performance.now() + 1300;
+  });
   canvas.addEventListener('click', () => {
-    if (app.screen === 'game' && !touch.on && renderer.fp && !app.locked && canvas.requestPointerLock) {
-      try { canvas.requestPointerLock(); } catch (e) {}
+    if (app.screen === 'game' && !touch.on && renderer.fp && !app.locked && canvas.requestPointerLock && performance.now() > lockCooldownUntil) {
+      try {
+        const pr = canvas.requestPointerLock();
+        if (pr && typeof pr.catch === 'function') pr.catch(() => {});
+      } catch (e) {}
     }
   });
   document.addEventListener('pointerlockchange', () => { app.locked = document.pointerLockElement === canvas; });
@@ -1143,7 +1152,29 @@
         if (pingAcc > 1) { pingAcc = 0; send({ t: 'ping', c: performance.now() }); }
       }
       renderer.predInput = app.paused ? null : { mx: inp.mx, my: inp.my, sprint: inp.sprint };
-      renderer.draw(now, dt);
+      try {
+        renderer.draw(now, dt);
+        renderer._drawFails = 0;
+      } catch (err) {
+        // a dead draw loop = permanent black screen; degrade instead of dying
+        renderer._drawFails = (renderer._drawFails || 0) + 1;
+        if (renderer._drawFails === 3 && window.ABAW_R3D && window.ABAW_RENDER && renderer instanceof ABAW_R3D.Renderer3D) {
+          try {
+            const old = renderer;
+            if (old.glCanvas && old.glCanvas.parentNode) old.glCanvas.parentNode.removeChild(old.glCanvas);
+            if (old.gl && old.gl.dispose) old.gl.dispose();
+            const g2 = $('game'); g2.style.background = '';
+            renderer = new ABAW_RENDER.Renderer(g2);
+            renderer.opts = old.opts || renderer.opts;
+            renderer.yaw = old.yaw || 0;
+            if (old.level) renderer.setLevel(old.level);
+            toast('3D renderer hit an error — classic view engaged', true);
+          } catch (e2) { console.error(e2); }
+        } else if (renderer._drawFails > 90) {
+          console.error('draw failed repeatedly:', err);
+          renderer._drawFails = 0;
+        }
+      }
       // own-player footsteps: stride accumulator + tile surface (client-side SFX only)
       const fOwn = renderer.ownPos;
       if (fOwn && renderer.fpMoving && !app.paused) {

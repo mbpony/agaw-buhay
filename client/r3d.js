@@ -471,6 +471,26 @@
     } catch (e) { return false; }
   }
 
+  /* The 2D HUD overlay reuses render.js drawHud/drawAwareness via .call(shim).
+     Those methods call this.drawMinimapFP(...) — a bare field object is NOT
+     enough (this exact gap black-screened the deployed 3D build), so the shim
+     carries the borrowed prototype methods too. */
+  function makeHudShim() {
+    const shim = { w: 0, h: 0, yaw: 0, ownPos: null, level: null, time: 0, hitT: 0, hitCrit: false, spread: 6, fpMoving: false, fpMuzzle: 0, youId: null };
+    const R2 = typeof window !== 'undefined' ? window.ABAW_RENDER : null;
+    if (R2 && R2.Renderer && R2.Renderer.prototype) {
+      shim.drawMinimapFP = R2.Renderer.prototype.drawMinimapFP;
+    }
+    return shim;
+  }
+  function bindShimMethods(shim) {
+    const R2 = typeof window !== 'undefined' ? window.ABAW_RENDER : null;
+    if (!shim.drawMinimapFP && R2 && R2.Renderer && R2.Renderer.prototype) {
+      shim.drawMinimapFP = R2.Renderer.prototype.drawMinimapFP;
+    }
+    return shim;
+  }
+
   class Renderer3D {
     constructor(canvas2d) {
       this.c = canvas2d;                       // reused as the HUD overlay
@@ -490,7 +510,7 @@
       this.buf = []; this.prev = null; this.curr = null;
       this.youId = null;
       this.opts = { shake: true, dmg: true, fps: false, quality: 1 };
-      this.hud = { w: 0, h: 0, yaw: 0, ownPos: null, level: null, time: 0, hitT: 0, hitCrit: false, spread: 6, fpMoving: false, fpMuzzle: 0, youId: null };
+      this.hud = bindShimMethods(makeHudShim());
       this._fCnt = 0; this._fAcc = 0;
       this.slowFrames = 0;
       this.resize();
@@ -641,6 +661,7 @@
       // 2D HUD overlay reuses the raycast renderer's HUD methods
       const R2 = window.ABAW_RENDER;
       if (R2) {
+        bindShimMethods(this.hud);          // render.js may have loaded after us
         this.hud.yaw = this.yaw; this.hud.ownPos = this.ownPos; this.hud.youId = this.youId;
         this.hud.time = (this.hud.time || 0) + dt;
         this.hud.fpMoving = this.fpMoving; this.hud.fpMuzzle = this.fpMuzzle || 0;
@@ -657,5 +678,5 @@
     }
   }
 
-  return { THREE, SceneKit, Renderer3D, buildWorld, ENEMY_BUILDERS, WEAPON_BUILDERS, webglAvailable, EYE, WALL_H };
+  return { THREE, SceneKit, Renderer3D, buildWorld, ENEMY_BUILDERS, WEAPON_BUILDERS, webglAvailable, makeHudShim, EYE, WALL_H };
 }));
