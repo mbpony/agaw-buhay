@@ -32,6 +32,8 @@
     yaw: 0, turn: 0, frameDt: 1 / 60, prevFire: false, yawInit: false
   };
   const renderer = new Renderer($('game'));
+  // FP audio: sounds pan by bearing relative to your view, not screen space
+  AU.setListener(() => (renderer.fp && renderer.ownPos) ? { fp: true, x: renderer.ownPos.x, y: renderer.ownPos.y, yaw: renderer.yaw } : null);
   renderer.opts.shake = settings.shake; renderer.opts.dmg = settings.dmg; renderer.opts.fps = settings.fps;
   AU.setVolume(settings.vol);
 

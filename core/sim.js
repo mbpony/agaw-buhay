@@ -498,7 +498,7 @@
       s.hp -= dmg; s.hurtT = 0.42;
       this.shake = Math.min(18, this.shake + dmg * 0.16);
       this.dmgWindow.push({ t: this.time, v: dmg });
-      this.pushFx('hurt', { x: s.x, y: s.y, id: s.id, kind: kind || 'hit' });
+      this.pushFx('hurt', { x: s.x, y: s.y, id: s.id, kind: kind || 'hit', sx: src && src.x !== undefined ? +src.x.toFixed(1) : undefined, sy: src && src.y !== undefined ? +src.y.toFixed(1) : undefined });
       if (kind === 'ff') this.pushFx('ff', { id: s.id });
       if (src && src.isEnemy) this.dir.stress = Math.min(1.8, this.dir.stress + 0.05);
       if (s.hp <= 0) {

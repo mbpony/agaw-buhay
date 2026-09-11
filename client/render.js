@@ -252,6 +252,7 @@
       this.cam = { x: 0, y: 0, zoom: 1 };
       // first-person is the shipped view; flip to false to fall back to top-down
       this.fp = true;
+      this.hurtDir = 0; this.hurtDirT = 0; this.ownPos = null;
       this.yaw = 0; this.zbuf = null; this.fpBob = 0; this.fpMuzzle = 0; this.fpMoving = false;
       this.shake = 0; this.flash = 0; this.hurt = 0; this.time = 0;
       this.buf = []; this.prev = null; this.curr = null;
@@ -396,6 +397,8 @@
         const me = ents.surv.find(e => e.id === this.youId);
         if (me && !me.dd) { me.x = this.predOwn.x; me.y = this.predOwn.y; }
       }
+      const ownE = this.youId ? ents.surv.find(e => e.id === this.youId) : null;
+      this.ownPos = ownE && !ownE.dd ? { x: ownE.x, y: ownE.y } : null;
       if (snap.bk && this.breakByN) {
         for (const d of snap.bk) {
           const b = this.breakByN[d.n];
@@ -1818,6 +1821,11 @@
             break;
           case 'hurt':
             this.hurtFlash = 1;
+            // remember WHERE the hit came from so FP can point at it
+            if (f.id === this.youId && f.sx !== undefined && f.sy !== undefined) {
+              this.hurtDir = Math.atan2(f.sy - f.y, f.sx - f.x);
+              this.hurtDirT = 0.9;
+            }
             this.fx.burst(f.x, f.y - 20, 6, { sp: 90, life: .4, r: 2.4, c: '#b01820', vz: 40, grav: 260 });
             break;
           case 'down':
@@ -2050,6 +2058,8 @@
         ctx.beginPath(); ctx.moveTo(sx, horizon - H * 0.06); ctx.lineTo(sx + 6, horizon - H * 0.05); ctx.stroke();
       }
 
+      this.drawAwareness(ctx, ents, dt);
+
       // ---- weapon viewmodel ----
       const sway = Math.sin(this.fpBob * 0.5) * (this.fpMoving ? 8 : 2);
       const gx = W / 2 + sway, gy = H - H * 0.06 + Math.abs(Math.cos(this.fpBob)) * (this.fpMoving ? 5 : 2);
@@ -2069,6 +2079,65 @@
       g = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.85);
       g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.55)');
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+
+    /* Edge-of-screen placement for an off-view bearing (view space: +x forward,
+       +y right). Pure so tests can pin the geometry. */
+    static threatMarker(bear, W, H, m) {
+      const vx = Math.cos(bear), vy = Math.sin(bear);   // view space: +x fwd, +y right
+      const behind = vx < 0;
+      const kx = Math.abs(vy) < 1e-4 ? Infinity : (W / 2 - m) / Math.abs(vy);
+      const ky = Math.abs(vx) < 1e-4 ? Infinity : (H / 2 - m) / Math.abs(vx);
+      const K = Math.min(kx, ky);
+      return { px: W / 2 + vy * K, py: H / 2 - vx * K, side: vy >= 0 ? 1 : -1, behind };
+    }
+
+    /* First-person awareness: off-view threat chevrons + proximity pulse +
+       a directional damage ring. FP has no peripheral vision; this is yours. */
+    drawAwareness(ctx, ents, dt) {
+      const W = this.w, H = this.h, own = this.ownPos;
+      if (!own || !this.level) return;
+      const TS = this.level.tile || 32;
+      if (this.hurtDirT > 0) this.hurtDirT -= dt;
+      for (const e of (ents.en || [])) {
+        if (e.dd) continue;
+        const dx = e.x - own.x, dy = e.y - own.y;
+        const d = Math.hypot(dx, dy);
+        if (d > 11 * TS || d < 1) continue;
+        let bear = Math.atan2(dy, dx) - this.yaw;
+        while (bear > Math.PI) bear -= 2 * Math.PI;
+        while (bear < -Math.PI) bear += 2 * Math.PI;
+        if (Math.abs(bear) < 0.52) continue;                 // inside the view cone
+        const m = Renderer.threatMarker(bear, W, H, 26);
+        const a = Math.max(0, Math.min(1, 1 - d / (11 * TS))) * 0.8 + 0.2;
+        const s = 9 + 7 * a + (e.boss ? 4 : 0);
+        ctx.globalAlpha = a * (m.behind ? 0.5 : 0.95);
+        ctx.fillStyle = e.boss ? '#ff2d55' : '#e0263f';
+        ctx.save(); ctx.translate(m.px, m.py);
+        ctx.rotate(Math.atan2(m.py - H / 2, m.px - W / 2));   // point away from centre
+        ctx.beginPath();
+        ctx.moveTo(s, 0); ctx.lineTo(-s * 0.7, -s * 0.8); ctx.lineTo(-s * 0.7, s * 0.8);
+        ctx.closePath(); ctx.fill(); ctx.restore();
+        if (d < 3.5 * TS) {                                   // too close for comfort
+          const pulse = 0.30 * (1 - d / (3.5 * TS)) * (0.65 + 0.35 * Math.sin(this.time * 7));
+          const g = ctx.createRadialGradient(m.px, m.py, 2, m.px, m.py, 90);
+          g.addColorStop(0, 'rgba(224,38,63,' + pulse.toFixed(3) + ')');
+          g.addColorStop(1, 'rgba(224,38,63,0)');
+          ctx.globalAlpha = 1; ctx.fillStyle = g;
+          ctx.fillRect(m.px - 90, m.py - 90, 180, 180);
+        }
+      }
+      ctx.globalAlpha = 1;
+      if (this.hurtDirT > 0) {                                // "galing SAAN yung tama?"
+        let hb = this.hurtDir - this.yaw;
+        while (hb > Math.PI) hb -= 2 * Math.PI;
+        while (hb < -Math.PI) hb += 2 * Math.PI;
+        const m = Renderer.threatMarker(hb, W, H, 34);
+        ctx.globalAlpha = Math.max(0, Math.min(1, this.hurtDirT / 0.9)) * 0.85;
+        ctx.strokeStyle = '#ff2038'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.arc(m.px, m.py, 24, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
 
     drawMinimap(canvas, snap) {

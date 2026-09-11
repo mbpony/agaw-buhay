@@ -54,6 +54,11 @@ const PORTRAIT = { width: 390, height: 844 };
   $('sStage').value = '1-1'; $('sHero').value = 'jun'; $('sDiff').value = 'normal';
   c.click('btnSoloStart'); await sleep(1400);
   ok(c.visible('hud'), 'run started');
+  const rt = dbg().renderer, tier0 = rt.tier;
+  rt.setTier('low'); const colLow = rt.fpColW();
+  rt.setTier('high'); const colHigh = rt.fpColW();
+  rt.setTier(tier0);
+  ok(colLow === 4 && colHigh === 2 && colLow > colHigh, 'FP raycast cost scales with perf tier (low ' + colLow + 'px cols vs high ' + colHigh + 'px)', colLow + '/' + colHigh);
   ok($('touch').classList.contains('on'), 'touch controls are live in-game');
   ok(errors.length === 0, 'no errors entering the run', errors.slice(0, 3).join(' | '));
 

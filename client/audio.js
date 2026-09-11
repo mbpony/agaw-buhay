@@ -80,8 +80,25 @@
   }
 
   /* ---------- spatial helper: world pos -> pan/vol ---------- */
+  let listenerFn = null;
+  function setListener(fn) { listenerFn = fn; }
+
   function spatial(pos, cam, viewW) {
-    if (!pos || !cam) return { pan: 0, vol: 1 };
+    if (!pos) return { pan: 0, vol: 1 };
+    // first-person: pan by BEARING relative to where the player looks, so a
+    // screech behind you actually comes from behind you
+    if (listenerFn) {
+      const L = listenerFn();
+      if (L && L.fp) {
+        const dx = pos.x - L.x, dy = pos.y - L.y;
+        const d = Math.hypot(dx, dy);
+        const bear = Math.atan2(dy, dx) - L.yaw;
+        const pan = Math.max(-1, Math.min(1, Math.sin(bear)));
+        const vol = Math.max(0, Math.min(1, 1 - d / 1000));
+        return { pan, vol: vol * vol * 0.9 + 0.1 };
+      }
+    }
+    if (!cam) return { pan: 0, vol: 1 };
     const dx = pos.x - cam.x, dy = pos.y - cam.y;
     const d = Math.hypot(dx, dy);
     const pan = Math.max(-1, Math.min(1, dx / (viewW * 0.55)));
@@ -270,7 +287,7 @@
   }
 
   root.ABAW_AUDIO = {
-    init, resume, setVolume, setMuted, SFX, spatial,
+    init, resume, setVolume, setMuted, SFX, spatial, setListener,
     startAmbience, stopAmbience, setTension,
     get ready() { return !!AC; },
     get ctx() { return AC; }
