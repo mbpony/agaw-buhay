@@ -29,11 +29,19 @@ Verified frames: fp-preview.png (yaw 0), fp-90.png (wall face, correct perspecti
 fp-180.png (flat wall, floor+ceiling). Walls read as full-height, sprites stand on the
 floor, gun sits bottom-centre.
 
-## Phase 2 — netcode for FP (NEXT)
-- Client-side prediction + reconciliation for position AND yaw (server stays
-  authoritative at 24 Hz snapshots; current code only nudges position, no yaw predict).
-- Local yaw applied instantly (never wait for server) → turning feels lag-free.
-- View-rate audit: keep FP draw under budget on the low tier.
+## Phase 2 — netcode for FP  ✅ DONE (commit 889c834)
+- client/predict.js mirrors Sim survivor movement exactly (0.00px divergence over
+  120 ticks): normalised input * hero speed * sprint mult, 0.72 idle decay,
+  terrain speedMul, axis-separated collision with the -0.08 bounce.
+- Inputs carry `seq`; the server echoes the last simulated seq per player as
+  `sv.isq`; the client replays un-acked samples on top of the authoritative
+  snapshot position (replay() reconstructs the sim trajectory exactly) and folds
+  residual error into an exp(-12t) decaying offset; >56px snaps (knockback).
+- Own survivor renders at the predicted position → FP raycast origin + camera
+  react on the input frame; 24 Hz snapshots correct, never drive, the view.
+- test/predict.js (10 checks) + isq echo assertions in test/net.js.
+- Suite after phase 2: 490 checks green (net 69, client 98, mobile 100,
+  loot 122, deploy 81, balance 10, predict 10).
 
 ## Phase 3 — awareness + polish, then DELETE top-down
 - Off-screen enemy indicators / directional damage cues (FP hides what top-down showed).
