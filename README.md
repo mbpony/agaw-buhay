@@ -1,6 +1,6 @@
 # AGAW-BUHAY: SURVIVAL — Act 1 Vertical Slice
 
-A 4-player co-op, top-down / 2.5D **survival horror shooter** built from the design document
+A 4-player co-op, **first-person 2.5D** (raycast) **survival horror shooter** built from the design document
 `AGAW_BUHAY_SURVIVAL_DOCUMENTATION.pdf`. Metro Manila is a locked-down Red Zone: *Ang Lason ng
 Lupa* (The Earth's Poison) has ruptured beneath Quiapo Church during typhoon season, and the
 miasma turns the infected into creatures out of Filipino folklore. Four survivors fight from the

@@ -278,7 +278,6 @@
     renderer.ambientKind = app.stage.ambient;
     renderer.youId = m.you;
     renderer.buf.length = 0;
-    renderer.fx.clear();
     AU.init(); AU.resume();
     AU.startAmbience(app.stage.ambient);
     buildSquadHud(m);
@@ -306,7 +305,7 @@
       if (app.carry) { app.sim.importCarry(app.carry); app.carry = null; }
       renderer.setLevel(LV.serialize(level));
       renderer.ambient = stage.light; renderer.ambientKind = stage.ambient; renderer.youId = app.you;
-      renderer.buf.length = 0; renderer.fx.clear();
+      renderer.buf.length = 0;
       AU.init(); AU.resume(); AU.startAmbience(stage.ambient);
       app.localAcc = 0;
       buildSquadHud({ cfg: { difficulty: diff, ff } });

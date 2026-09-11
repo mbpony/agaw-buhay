@@ -4,7 +4,7 @@
 end of the project, not before). FP must work on mobile from day one. Lag is a
 first-class concern ("please do take note the lag too").
 
-## Phase 1 — playable FP renderer  ✅ BUILT, visually verified, ⚠️ UNCOMMITTED
+## Phase 1 — playable FP renderer  ✅ DONE (commit 5c1d6fe)
 Sandbox storage fault (I/O errors on /usr/bin/git, ps, free; SIGBUS in node) blocked
 `git commit` and the jsdom test suites on 2026-09-11. Backups in `backup/fp-phase1/`.
 Commit + push as soon as the environment recovers, then re-run `node test/all.js`
@@ -43,7 +43,17 @@ floor, gun sits bottom-centre.
 - Suite after phase 2: 490 checks green (net 69, client 98, mobile 100,
   loot 122, deploy 81, balance 10, predict 10).
 
-## Phase 3 — awareness + polish, then DELETE top-down
+## Phase 3 — awareness + mobile perf + top-down DELETED  ✅ DONE
+- Directional damage ring (hurt fx carries attacker pos), off-view threat
+  chevrons + proximity pulse (Renderer.threatMarker, unit-tested), FP audio
+  panning by bearing via AU.setListener (test/aware.js, 16 checks).
+- Mobile perf: FP column width tier-scaled and asserted (4/3/2 px per column).
+- TOP-DOWN RENDERER DELETED: 23 draw methods, chunk/atlas cache, particle &
+  decal systems, weather, floating text, lighting pass — render.js went from
+  2278 to 1170 lines. consumeFx is now audio-only (+damage direction). FPS
+  stats + hurt vignette moved ahead of the FP draw (they were dead in FP).
+- Suite after phase 3: net 69, client 98, mobile 101, loot 122, deploy 81,
+  balance 10, predict 10, aware 16, dom + sim-cost = ALL GREEN.
 - Off-screen enemy indicators / directional damage cues (FP hides what top-down showed).
 - Audio panning per enemy bearing.
 - Mobile perf validation on-device, then remove the top-down draw path entirely.
