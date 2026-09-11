@@ -1,0 +1,37 @@
+# ============================================================
+#  AGAW-BUHAY: SURVIVAL — Render blueprint
+#
+#  Deploy: push this repo to GitHub/GitLab, then on render.com
+#  New → Blueprint → pick the repo. Render reads this file.
+#
+#  Manual instead: New → Web Service
+#    Runtime          Node
+#    Build command    npm install
+#    Start command    npm start
+#    Health check     /health
+#    Instance type    Free (or Starter for always-on)
+#    WebSocket        supported automatically on web services
+# ============================================================
+services:
+  - type: web
+    name: agaw-buhay
+    runtime: node
+    plan: free
+    region: singapore                 # closest to PH — pick ohio/frankfurt for US/EU squads
+    branch: main
+    rootDir: .
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    # WebSockets need sticky routing: never scale this past one instance or
+    # players will land on different processes and see different room lists.
+    numInstances: 1
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.1
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        # Render injects its own PORT at runtime; this is only a local default.
+        value: 3000

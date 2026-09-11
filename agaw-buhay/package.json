@@ -1,0 +1,37 @@
+{
+  "name": "agaw-buhay",
+  "version": "1.0.0-act1",
+  "description": "Agaw-Buhay: Survival — 4-player co-op top-down survival horror shooter set in a locked-down Metro Manila. Act 1 vertical slice: procedural levels, server-authoritative sim, WebSocket co-op + offline single player, 100% procedural canvas art.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "test": "node test/all.js",
+    "test:balance": "node test/balance.js",
+    "test:net": "node test/net.js",
+    "test:client": "node test/client.js",
+    "test:mobile": "node test/mobile.js",
+    "test:deploy": "node test/deploy.js",
+    "test:dom": "node test/domcheck.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "game",
+    "co-op",
+    "survival-horror",
+    "websocket",
+    "canvas",
+    "procedural",
+    "filipino-folklore"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}
