@@ -47,7 +47,7 @@ const server = http.createServer((req, res) => {
   if (u === '/api/rooms') { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ rooms: roomList() })); return; }
   // Field diagnostics beacon: clients in the wild POST renderer state here when
   // something looks wrong; the dev reads it back with GET /diag. In-memory only.
-  if (u === '/diag') {
+  if (u === '/diag' || u === '/client/diag') {
     if (req.method === 'POST') {
       let body = '';
       req.on('data', c => { if (body.length < 8192) body += c; });

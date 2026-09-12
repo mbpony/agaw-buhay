@@ -1103,9 +1103,36 @@
         g2: [g2.width, g2.height, g2.clientWidth, g2.clientHeight],
         px2d: px2d, px3d: (r.diagProbe ? r.diagProbe() : null),
         layout: window.ABAW_HUDL ? window.ABAW_HUDL.layout : null,
-        vis: document.visibilityState
+        vis: document.visibilityState,
+        screens: Array.prototype.slice.call(document.querySelectorAll('.screen,.modal')).filter(e => !e.classList.contains('hidden')).map(e => e.id),
+        covers: (function () {
+          const out = [];
+          const kids = Array.prototype.concat.call(Array.prototype.slice.call(document.body.children), Array.prototype.slice.call(($('app') || { children: [] }).children));
+          for (const el of kids) {
+            if (!el || !el.getBoundingClientRect) continue;
+            const cs = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            if (cs.display === 'none' || parseFloat(cs.opacity) < 0.5) continue;
+            if (r.width >= innerWidth - 4 && r.height >= innerHeight - 4 &&
+                (cs.position === 'fixed' || cs.position === 'absolute') &&
+                cs.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+              out.push({ id: el.id || null, cls: String(el.className).slice(0, 40), bg: cs.backgroundColor, z: cs.zIndex });
+            }
+          }
+          return out;
+        })(),
+        cstyle: (function () {
+          const o = {};
+          for (const id of ['game', 'game3d']) {
+            const el = document.getElementById(id);
+            if (!el) { o[id] = null; continue; }
+            const cs = getComputedStyle(el);
+            o[id] = { d: cs.display, v: cs.visibility, o: cs.opacity, z: cs.zIndex, pos: cs.position };
+          }
+          return o;
+        })()
       };
-      fetch('diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(() => {});
+      fetch('/diag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(() => {});
     } catch (e) {}
   }
 
