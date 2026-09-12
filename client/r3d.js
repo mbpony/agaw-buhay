@@ -502,7 +502,12 @@
       canvas2d.style.background = 'transparent';
       this.gl = new THREE.WebGLRenderer({ canvas: this.glCanvas, antialias: true, powerPreference: 'high-performance' });
       this.contextLost = false;
-      this.glCanvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); this.contextLost = true; }, false);
+      this.glCanvas.addEventListener('webglcontextlost', (ev) => {
+        ev.preventDefault();
+        this.contextLost = true;
+        // tell main.js to swap renderers on the very next frame
+        this._swapNow = true;
+      }, false);
       this.glCanvas.addEventListener('webglcontextrestored', () => { this.contextLost = false; }, false);
       this.kit = new SceneKit();
       this.fp = true;

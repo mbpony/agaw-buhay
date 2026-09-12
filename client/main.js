@@ -35,7 +35,9 @@
   };
   // 3D presentation layer (master doc): real Three.js scene when WebGL exists;
   // the raycast renderer stays as the no-WebGL / ?r2d debug fallback.
-  const renderer = (window.ABAW_R3D && window.ABAW_R3D.webglAvailable() && !/[?&]r2d\b/.test(location.search))
+  let no3d = false;
+  try { no3d = sessionStorage.getItem('abaw.no3d') === '1'; } catch (e) {}
+  let renderer = (window.ABAW_R3D && window.ABAW_R3D.webglAvailable() && !no3d && !/[?&]r2d\b/.test(location.search))
     ? new window.ABAW_R3D.Renderer3D($('game'))
     : new Renderer($('game'));
   // FP audio: sounds pan by bearing relative to your view, not screen space
@@ -1142,18 +1144,27 @@
   function engageFallback(reason) {
     const old = renderer;
     if (!window.ABAW_R3D || !window.ABAW_RENDER || !(old instanceof ABAW_R3D.Renderer3D)) return false;
+    // every step is individually guarded: a throw mid-swap used to leave the
+    // game stuck on a context-lost 3D renderer behind an opaque canvas (= the
+    // field black screen the beacon caught: ctxLost true, fails 83, fCnt 0)
+    try { if (old.glCanvas && old.glCanvas.parentNode) old.glCanvas.parentNode.removeChild(old.glCanvas); } catch (e) {}
+    try { if (!old.contextLost && old.gl && old.gl.dispose) old.gl.dispose(); } catch (e) {}
+    try { sessionStorage.setItem('abaw.no3d', '1'); } catch (e) {}   // don't retry 3D this session
+    let next = null;
     try {
-      if (old.glCanvas && old.glCanvas.parentNode) old.glCanvas.parentNode.removeChild(old.glCanvas);
-      if (old.gl && old.gl.dispose) old.gl.dispose();
-      const g2 = $('game'); g2.style.background = '';
-      renderer = new ABAW_RENDER.Renderer(g2);
-      renderer.opts = old.opts || renderer.opts;
-      renderer.yaw = old.yaw || 0;
-      if (old.level) renderer.setLevel(old.level);
-      app.lastDrawError = reason;
-      toast('3D renderer issue — classic view engaged', true);
-      return true;
+      const g2 = $('game');
+      next = new ABAW_RENDER.Renderer(g2);
+      next.opts = old.opts || next.opts;
+      next.yaw = old.yaw || 0;
+      if (old.level) next.setLevel(old.level);
+      next.youId = old.youId;
+      next.buf.length = 0;
     } catch (e2) { console.error(e2); return false; }
+    renderer = next;
+    renderer._drawFails = 0;
+    app.lastDrawError = reason;
+    toast('3D renderer issue — classic view engaged', true);
+    return true;
   }
 
   /* Tile under a world point -> footstep/acoustic surface name (master doc §29). */
@@ -1265,7 +1276,9 @@
             app.lastDrawError + '\n\nI-screenshot ito at ipadala sa dev. (tap to dismiss)');
         }
         sendDiag(true);
-        if (renderer._drawFails === 3) engageFallback('draw threw: ' + app.lastDrawError);
+        if (renderer._drawFails === 3 || (window.ABAW_R3D && renderer instanceof ABAW_R3D.Renderer3D && renderer.contextLost)) {
+          engageFallback('draw threw: ' + app.lastDrawError);
+        }
         else if (renderer._drawFails > 90) { console.error('draw failed repeatedly:', err); renderer._drawFails = 0; }
       }
       sendDiag(false);
