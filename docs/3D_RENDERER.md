@@ -6,5 +6,7 @@ Snapshot flow: push() buffers -> sample() interpolates (100ms back) -> sync() ma
 Prediction: renderer.predOwn (main.js) overrides own entity before camera — same contract as raycast path.
 Fallback: no WebGL or ?r2d query -> classic raycast Renderer (debug flag per master doc §56).
 Tiers: high/medium/low -> pixelRatio, shadows, rain count, fog density, dressing visibility; autoTier downgrades on sustained >26ms frames.
-Pitch look (milestone 4): presentation-only vertical look (mouse movementY / right-stick vertical), clamped +/-1.15 rad, consumed by Renderer3D via pitchInput; gentle auto look-up assist when an airborne Manananggal (z>26) is within 1100u. Sim aiming stays 2D yaw.
+Pitch look (milestone 4): presentation-only vertical look (mouse movementY / right-stick vertical), clamped +/-1.15 rad, consumed by BOTH renderers via pitchInput; gentle auto look-up assist when an airborne Manananggal (z>26) is within 1100u. Sim aiming stays 2D yaw.
+Raycast path: pitch shifts the projection horizon (Renderer.pitchPx = pitch * H * 0.6); walls/sprites/ground all key off `horizon`, so the whole world tilts. Verified via tools/fp-preview.js PITCH env seed.
+WebGL resilience (field beacon 2026-09-12): conservative context attrs (antialias/stencil off, powerPreference default); on contextlost a 1.6s restore grace runs (three re-inits on restore); if still lost, main.js swaps to the raycast renderer mid-run and blacklists 3D for the session (sessionStorage abaw.no3d, ?3d overrides). Renderer must stay a `let` binding or the swap dies on a TypeError.
 Zone streaming lite: street dressing is bucketed into 720u chunks at build time; chunks beyond 2400u of the camera are hidden on medium/low tiers.

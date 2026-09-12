@@ -37,6 +37,7 @@
   // the raycast renderer stays as the no-WebGL / ?r2d debug fallback.
   let no3d = false;
   try { no3d = sessionStorage.getItem('abaw.no3d') === '1'; } catch (e) {}
+  if (/[?&]3d\b/.test(location.search)) no3d = false;   // player forces a 3D retry
   let renderer = (window.ABAW_R3D && window.ABAW_R3D.webglAvailable() && !no3d && !/[?&]r2d\b/.test(location.search))
     ? new window.ABAW_R3D.Renderer3D($('game'))
     : new Renderer($('game'));

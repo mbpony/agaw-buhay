@@ -13,7 +13,9 @@
 - docs/: 14-file design/engineering set per master doc §62.
 - New suite `test/r3d.js` (29 asserts, headless scene-graph: registries, world-vs-grid counts, snapshot->3D mapping, viewmodel swap, tier scaling). All suites green (net 69, client 100, mobile 101, loot 122, deploy 83, r3d 29, aware 21).
 - Milestones 4-5 (shipped same day): pitch look (mouse Y / right-stick vertical, presentation-only, clamped) + airborne-Manananggal look-up assist; surface-aware footsteps (water/asphalt/metal/rubble/concrete via LV.tileAt + stride accumulator); zone streaming lite (dressing chunked at 720u, distance-culled at 2400u on med/low); worldgen spawn-node tags (flooded/street/interior/rubble/flood_edge/dark, serialize-safe, tested over 217 nodes). r3d suite now 42 asserts; ALL SUITES PASSED.
-- NEXT: director consumes node tags for folklore-correct enemy placement (allowedEnemies/weight/cooldown); full Act 1 zone-grammar conversion in level.js; boss arena verticality pass.
+- Field black-screen RESOLVED via /diag beacon: WebGL context loss + const-renderer fallback bug. Fixes: let renderer, guarded mid-run swap, contextlost grace + immediate fallback, session 3D blacklist (?3d retry), conservative GL attrs.
+- Vertical look now in BOTH renderers (raycast horizon shift via Renderer.pitchPx), desktop mouse-Y + mobile right-stick; fp-preview PITCH seed for visual regression.
+- NEXT: CODM-style HUD redesign (bottom-center weapon panel w/ switch, pickup beside fire, throw above fire — user-specified); director node-tag consumption; Act 1 zone-grammar conversion.
 
 # First-Person (2.5D) — Phase Status
 

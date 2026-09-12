@@ -500,15 +500,23 @@
       this.glCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block';
       canvas2d.parentNode.insertBefore(this.glCanvas, canvas2d);
       canvas2d.style.background = 'transparent';
-      this.gl = new THREE.WebGLRenderer({ canvas: this.glCanvas, antialias: true, powerPreference: 'high-performance' });
+      // conservative context attributes: MSAA + high-performance hints were
+      // implicated in field context losses (beacon 2026-09-12); stability first
+      this.gl = new THREE.WebGLRenderer({ canvas: this.glCanvas, antialias: false, stencil: false, powerPreference: 'default' });
       this.contextLost = false;
       this.glCanvas.addEventListener('webglcontextlost', (ev) => {
         ev.preventDefault();
         this.contextLost = true;
-        // tell main.js to swap renderers on the very next frame
-        this._swapNow = true;
+        this._swapNow = false;
+        // give the driver ~1.6s to restore the context (three re-inits on
+        // restore); only if it stays lost do we hand over to the raycast view
+        if (this._grace) clearTimeout(this._grace);
+        this._grace = setTimeout(() => { if (this.contextLost) this._swapNow = true; }, 1600);
       }, false);
-      this.glCanvas.addEventListener('webglcontextrestored', () => { this.contextLost = false; }, false);
+      this.glCanvas.addEventListener('webglcontextrestored', () => {
+        this.contextLost = false; this._swapNow = false;
+        if (this._grace) { clearTimeout(this._grace); this._grace = null; }
+      }, false);
       this.kit = new SceneKit();
       this.fp = true;
       this.localMode = false;
@@ -617,7 +625,8 @@
     }
     diagProbe() { return this._lastPx || null; }
     draw(now, dt) {
-      if (this.contextLost) throw new Error('WebGL context lost');   // main.js falls back to raycast
+      if (this._swapNow) throw new Error('WebGL context lost (not restored)');   // main.js falls back
+      if (this.contextLost) return;                                    // grace period: skip frames
       if (!this.w || !this.h) this.resize();                          // zero-size self-heal
       const s = this.sample(now);
       if (!s || !this.kit.level) return;

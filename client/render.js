@@ -110,6 +110,7 @@
       this.hurtDir = 0; this.hurtDirT = 0; this.ownPos = null;
       this.hitT = 0; this.hitCrit = false; this.spread = 6; this._pyaw = 0; this.yawVel = 0;
       this.yaw = 0; this.zbuf = null; this.fpBob = 0; this.fpMuzzle = 0; this.fpMoving = false;
+      this.pitch = 0; this.pitchInput = 0;      // vertical look (presentation-only)
       this.shake = 0; this.flash = 0; this.hurt = 0; this.time = 0;
       this.buf = []; this.prev = null; this.curr = null;
       this.localMode = false;
@@ -836,7 +837,11 @@
       // head bob tracks movement so walking feels like walking
       this.fpBob = (this.fpBob || 0) + dt * (this.fpMoving ? 10 : 2.4);
       const bob = Math.sin(this.fpBob) * (this.fpMoving ? 6 : 1.6);
-      const horizon = H * 0.5 + bob;
+      // vertical look: consume accumulated pitch input, shift the horizon.
+      // Walls/sprites project off `horizon`, so the whole world tilts with it.
+      this.pitch = clamp((this.pitch || 0) + (this.pitchInput || 0), -1.15, 1.15);
+      this.pitchInput = 0;
+      const horizon = H * 0.5 + bob + Renderer.pitchPx(this.pitch, H);
 
       // ceiling + floor wash (cheap, and reads as a dark interior)
       let g = ctx.createLinearGradient(0, 0, 0, horizon);
@@ -1353,6 +1358,8 @@
       ctx.textAlign = 'left';
     }
 
+    /* pitch (rad, +up) -> screen px shift of the horizon */
+    static pitchPx(p, H) { return (p || 0) * H * 0.6; }
     static threatMarker(bear, W, H, m) {
       const vx = Math.cos(bear), vy = Math.sin(bear);   // view space: +x fwd, +y right
       const behind = vx < 0;
